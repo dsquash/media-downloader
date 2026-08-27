@@ -1,0 +1,10 @@
+{
+  "version": "1.2.0",
+  "files": [
+    "index.html",
+    "js/main.js",
+    "js/CSInterface.js",
+    "jsx/host.jsx",
+    "CSXS/manifest.xml"
+  ]
+}

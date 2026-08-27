@@ -884,6 +884,16 @@ elSort.addEventListener("click", function () {
     });
 });
 
+/* Install commands are long and Premiere swallows Cmd/Ctrl+C, so the only
+   practical way to get one out of the panel is a copy button. */
+Array.prototype.forEach.call(document.querySelectorAll(".ins-copy"), function (btn) {
+    btn.addEventListener("click", function () {
+        writeClipboard(document.getElementById(btn.getAttribute("data-target")).value);
+        btn.textContent = "✔";
+        setTimeout(function () { btn.textContent = "⧉"; }, 1200);
+    });
+});
+
 elCopyCredit.addEventListener("click", function () {
     elCreditText.select();
     document.execCommand("copy");

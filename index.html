@@ -249,6 +249,45 @@
     color: #666;
     text-align: center;
   }
+  #installHelp {
+    margin-top: 8px;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+  #installHelp summary {
+    cursor: pointer;
+    outline: none;
+    padding: 2px 0;
+  }
+  #installHelp summary:hover { color: var(--text); }
+  .ins-os { margin: 8px 0 3px; color: #999; }
+  .ins-row { display: flex; gap: 4px; }
+  .ins-row input {
+    flex: 1;
+    min-width: 0;
+    background: #1b1b1b;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: #b0b0b0;
+    font-family: Menlo, Consolas, monospace;
+    font-size: 9.5px;
+    padding: 4px 5px;
+    outline: none;
+    user-select: text;
+  }
+  .ins-copy {
+    background: #3a3a3a;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 11px;
+    padding: 0 7px;
+    cursor: pointer;
+  }
+  .ins-copy:hover { background: #4a4a4a; }
+  .ins-note { margin-top: 8px; line-height: 1.5; color: #777; }
 </style>
 </head>
 <body>
@@ -305,11 +344,31 @@
   <div id="log"></div>
 
   <div id="projectInfo">Project: detecting…</div>
+
+  <details id="installHelp">
+    <summary>⚙ Install on another machine</summary>
+    <div class="ins-os">macOS — open <b>Terminal</b></div>
+    <div class="ins-row">
+      <input type="text" id="insMac" readonly value="curl -fsSL https://raw.githubusercontent.com/dsquash/media-downloader/main/install.sh | bash">
+      <button class="ins-copy" data-target="insMac" title="Copy">⧉</button>
+    </div>
+    <div class="ins-os">Windows — open <b>PowerShell</b></div>
+    <div class="ins-row">
+      <input type="text" id="insWin" readonly value="irm https://raw.githubusercontent.com/dsquash/media-downloader/main/install.ps1 | iex">
+      <button class="ins-copy" data-target="insWin" title="Copy">⧉</button>
+    </div>
+    <div class="ins-note">
+      Paste it, press Enter, then restart Premiere Pro / After Effects and open
+      <b>Window → Extensions → Media Downloader</b>.<br>
+      The same command repairs an existing install — it also fetches yt-dlp, ffmpeg and deno.
+    </div>
+  </details>
+
   <div class="footer">Reach out to Marian Grosu for any problem.</div>
 
   <!-- the ?v= query defeats CEF's stale script cache — keep it equal to version.json,
        otherwise an auto-update writes a new main.js that the panel never reads -->
-  <script src="js/CSInterface.js?v=1.2.0"></script>
-  <script src="js/main.js?v=1.2.0"></script>
+  <script src="js/CSInterface.js?v=1.2.1"></script>
+  <script src="js/main.js?v=1.2.1"></script>
 </body>
 </html>

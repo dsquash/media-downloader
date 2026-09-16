@@ -16,6 +16,17 @@ function Ok($m)   { Write-Host $m -ForegroundColor Green }
 function Warn($m) { Write-Host $m -ForegroundColor Yellow }
 function Die($m)  { Write-Host $m -ForegroundColor Red; exit 1 }
 
+# A binary that exists but won't run is worse than a missing one - yt-dlp reports
+# only "ffmpeg is not installed" and you go looking in the wrong place entirely.
+function Runs($exe, $flag = '-version') {
+    if (-not (Test-Path $exe)) { return $false }
+    try {
+        $p = Start-Process -FilePath $exe -ArgumentList $flag -NoNewWindow -Wait -PassThru `
+                           -RedirectStandardOutput 'NUL' -RedirectStandardError 'NUL'
+        return $p.ExitCode -eq 0
+    } catch { return $false }
+}
+
 Write-Host ''
 Step '=== Media Downloader - installer (Windows) ==='
 Write-Host ''
@@ -54,9 +65,11 @@ Ok "      installed to $Dest"
 
 Step '[3/5] Installing yt-dlp...'
 try {
+    $ytdlp = Join-Path $Dest 'bin\yt-dlp.exe'
     Invoke-WebRequest -UseBasicParsing `
         -Uri 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' `
-        -OutFile (Join-Path $Dest 'bin\yt-dlp.exe')
+        -OutFile $ytdlp
+    if (-not (Runs $ytdlp '--version')) { Die '      ! yt-dlp will not run on this machine.' }
     Ok '      done'
 } catch {
     Die '      ! yt-dlp download failed - the extension cannot work without it.'
@@ -71,9 +84,11 @@ try {
     Expand-Archive -Path $ffZip -DestinationPath (Join-Path $Tmp 'ff') -Force
     foreach ($tool in 'ffmpeg.exe','ffprobe.exe') {
         $exe = Get-ChildItem (Join-Path $Tmp 'ff') -Recurse -Filter $tool | Select-Object -First 1
+        $target = Join-Path $Dest "bin\$tool"
         if ($exe) {
-            Copy-Item $exe.FullName (Join-Path $Dest "bin\$tool") -Force
-            Ok "      $tool ok"
+            Copy-Item $exe.FullName $target -Force
+            if (Runs $target) { Ok "      $tool ok" }
+            else { Remove-Item $target -Force -ErrorAction SilentlyContinue; Warn "      ! $tool will not run on this machine" }
         } else {
             Warn "      ! $tool missing from the archive"
         }

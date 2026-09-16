@@ -975,19 +975,21 @@ elBtn.addEventListener("click", function () {
 /* ---------- startup health check ----------
    ffprobe is easy to miss: yt-dlp only complains about it after a download has
    already finished, and the message ("ffprobe and ffmpeg not found") blames both.
-   Check up front instead, and name the tool that is actually missing. */
+   Run each tool up front instead — a binary built for the wrong CPU sits there on
+   disk looking installed, so existing is not the same as working. */
 
 function checkTools() {
     var tools = ["yt-dlp", "ffmpeg", "ffprobe"];
-    var missing = [], pending = tools.length;
+    var broken = [], pending = tools.length;
 
     tools.forEach(function (name) {
         var flag = name === "yt-dlp" ? "--version" : "-version";
         cp.execFile(findBinary(name), [flag], function (err) {
-            if (err) missing.push(name);
+            if (err) broken.push(name);
             if (--pending > 0) return;
-            if (!missing.length) return;
-            setStatus("Missing: " + missing.join(", ") + ". Re-run the installer — see the README.", "err");
+            if (!broken.length) return;
+            setStatus(broken.join(" and ") + " missing or not working — re-run the install " +
+                      "command under “Install on another machine” below.", "err");
         });
     });
 }

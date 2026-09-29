@@ -345,14 +345,91 @@ function ytApplyRoughCut(dataJson) {
             applied.push(cut);
         }
 
+        // Punch-in has to happen before the gaps close: the pieces are found by the
+        // positions the selected clips had, and the TrackItem refs stay valid after moving.
+        var punched = 0;
+        if (d.punch && d.ranges && applied.length) {
+            for (i = 0; i < d.video.length; i++) {
+                var vt = seq.videoTracks[d.video[i]], pieces = [];
+                for (j = 0; j < vt.clips.numItems; j++) {
+                    var pc = vt.clips[j];
+                    for (var r = 0; r < d.ranges.length; r++) {
+                        var rg = d.ranges[r];
+                        if (rg.track === d.video[i] && pc.start.seconds >= rg.s - tol && pc.end.seconds <= rg.e + tol) {
+                            pieces.push(pc);
+                            break;
+                        }
+                    }
+                }
+                punched += ytPunchPieces(pieces, d.punch);
+            }
+        }
+
         var saved = 0;
         for (k = 0; k < applied.length; k++) saved += applied[k].e - applied[k].s;
         var closed = d.close && applied.length ? ytCloseGaps(tracks, applied, tol) : false;
 
         return ytStr({ applied: applied.length, removed: removed, skipped: skipped, missed: missed,
-                       saved: saved, closed: closed, backup: backup });
+                       saved: saved, closed: closed, backup: backup, punched: punched });
     } catch (err) {
         return ytStr({ error: "Rough cut failed: " + err });
+    }
+}
+
+/* Motion > Scale of a video track item. Display names are localized, so match the
+   component by matchName first; Scale is property [1] after Position. */
+function ytMotionScale(clip) {
+    var comps = clip.components;
+    for (var i = 0; i < comps.numItems; i++) {
+        var c = comps[i];
+        if (!/motion/i.test(String(c.matchName || "")) &&
+            !/^(motion|mi[sș]care|bewegung|trajectoire|movimiento)/i.test(String(c.displayName || ""))) continue;
+        for (var j = 0; j < c.properties.numItems; j++) {
+            if (/^(scale|scar[aă]|scalare|skalierung|[ée]chelle|escala)$/i.test(String(c.properties[j].displayName))) {
+                return c.properties[j];
+            }
+        }
+        if (c.properties.numItems > 1) return c.properties[1];
+    }
+    return null;
+}
+
+/* Every second piece is scaled up relative to the piece before it, so the edit
+   alternates wide / close. Measuring from the preceding (un-zoomed) piece rather
+   than the clip's own value keeps it right for footage that isn't at 100% to begin
+   with, and makes a second run a no-op instead of zooming further. Keyframed
+   Scale is left alone — overwriting it would destroy an animation. */
+function ytPunchPieces(pieces, zoom) {
+    pieces.sort(function (a, b) { return a.start.seconds - b.start.seconds; });
+    var base = null, done = 0;
+    for (var i = 0; i < pieces.length; i++) {
+        var p = ytMotionScale(pieces[i]);
+        if (!p) continue;
+        try { if (p.isTimeVarying()) continue; } catch (e) {}
+        if (i % 2 === 0) { base = p.getValue(); continue; }
+        if (base === null) continue;
+        try { p.setValue(base * zoom / 100, true); done++; } catch (e2) {}
+    }
+    return done;
+}
+
+function ytPunchIn(zoom) {
+    if (ytIsAE()) return ytStr({ error: "Punch-in is only available in Premiere Pro." });
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return ytStr({ error: "No active sequence." });
+        var done = 0, seen = 0;
+        for (var t = 0; t < seq.videoTracks.numTracks; t++) {
+            var cl = seq.videoTracks[t].clips, pieces = [];
+            for (var j = 0; j < cl.numItems; j++) if (ytSelected(cl[j])) pieces.push(cl[j]);
+            seen += pieces.length;
+            if (pieces.length > 1) done += ytPunchPieces(pieces, zoom);
+        }
+        if (!seen) return ytStr({ error: "Select the video clips to punch in on." });
+        if (seen === 1) return ytStr({ error: "Select at least two clips — punch-in alternates between them." });
+        return ytStr({ done: done, seen: seen });
+    } catch (err) {
+        return ytStr({ error: "Punch-in failed: " + err });
     }
 }
 

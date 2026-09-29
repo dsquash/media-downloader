@@ -782,6 +782,9 @@ var elRcClose = document.getElementById("rcClose");
 var elRcNorm = document.getElementById("rcNorm");
 var elNormalize = document.getElementById("btnNormalize");
 var elNormTarget = document.getElementById("normTarget");
+var elRcPunch = document.getElementById("rcPunch");
+var elPunch = document.getElementById("btnPunch");
+var elPunchZoom = document.getElementById("punchZoom");
 
 function numIn(el, def) {
     var v = parseFloat(String(el.value).replace(",", "."));
@@ -791,6 +794,7 @@ function numIn(el, def) {
 function setToolsBusy(busy) {
     elRoughCut.disabled = busy;
     elNormalize.disabled = busy;
+    elPunch.disabled = busy;
     elProgressWrap.style.display = busy ? "block" : "none";
     if (busy) elProgressBar.style.width = "0%";
 }
@@ -990,6 +994,8 @@ function roughCut() {
     var pad = Math.max(0, numIn(elRcPad, 0.1));
     var close = elRcClose.checked, norm = elRcNorm.checked;
     var target = numIn(elNormTarget, -16);
+    var punch = elRcPunch.checked ? punchZoom() : 0;
+    if (punch === null) return;
 
     setToolsBusy(true);
     setStatus("Reading the selection…");
@@ -1011,8 +1017,10 @@ function roughCut() {
                     return;
                 }
                 setStatus(prefix + "Cutting " + cuts.length + " silent section(s)…");
-                var payload = { cuts: cuts, frame: sel.frame, close: close,
-                                video: uniqTracks(sel.items, "video"), audio: uniqTracks(sel.items, "audio") };
+                var payload = { cuts: cuts, frame: sel.frame, close: close, punch: punch,
+                                video: uniqTracks(sel.items, "video"), audio: uniqTracks(sel.items, "audio"),
+                                ranges: sel.items.filter(function (it) { return it.kind === "video"; })
+                                                 .map(function (it) { return { track: it.track, s: it.seqStart, e: it.seqEnd }; }) };
                 cs.evalScript("ytApplyRoughCut(" + JSON.stringify(JSON.stringify(payload)) + ")", function (res) {
                     var r;
                     try { r = JSON.parse(res); } catch (e) { toolsDone("Rough cut failed: " + res, true); return; }
@@ -1020,6 +1028,7 @@ function roughCut() {
                     var msg = "✔ Cut " + r.applied + " silent section(s)";
                     msg += close && r.closed ? " — " + fmtDur(r.saved) + " shorter." : ", gaps left in place.";
                     if (close && !r.closed) msg += " Some gaps could not be closed: Sequence → Close Gap.";
+                    if (punch) msg += " Punch-in on " + (r.punched || 0) + " piece(s).";
                     if (r.skipped) msg += " " + r.skipped + " skipped (unselected clips on the same tracks).";
                     if (r.missed) msg += " " + r.missed + " could not be cut cleanly and were left alone.";
                     if (r.backup) msg += " Original kept as “" + r.backup + "”.";
@@ -1054,7 +1063,33 @@ function normalizeSelected() {
     });
 }
 
+/* returns the zoom percentage, or null (with the reason shown) if it makes no sense */
+function punchZoom() {
+    var z = numIn(elPunchZoom, 110);
+    if (z <= 100 || z > 200) {
+        setStatus("Punch-in zoom must be between 101 and 200 %.", "err");
+        return null;
+    }
+    return z;
+}
+
+function punchSelected() {
+    var zoom = punchZoom();
+    if (zoom === null) return;
+    setToolsBusy(true);
+    setStatus("Punching in…");
+    cs.evalScript("ytPunchIn(" + zoom + ")", function (res) {
+        var r;
+        try { r = JSON.parse(res); } catch (e) { toolsDone("Punch-in failed: " + res, true); return; }
+        if (r.error) { toolsDone(r.error, true); return; }
+        var msg = "✔ Punch-in " + zoom + "% on " + r.done + " of " + r.seen + " clip(s) — every second one.";
+        if (r.done < Math.floor(r.seen / 2)) msg += " Clips with keyframed Scale were left alone.";
+        toolsDone(msg, false);
+    });
+}
+
 elRoughCut.addEventListener("click", roughCut);
+elPunch.addEventListener("click", punchSelected);
 elNormalize.addEventListener("click", normalizeSelected);
 
 elSort.addEventListener("click", function () {

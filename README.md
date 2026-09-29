@@ -22,6 +22,7 @@ Select one or more clips on the timeline — linked video and audio together —
 | Pad | kept on both sides of every cut, so words aren't clipped |
 | Close gaps | slides the rest of the edit left; off leaves the gaps in place |
 | Normalize first | applies Normalize (below) before cutting, so every piece gets the same volume |
+| Punch-in | zooms in on every second piece after cutting (see below) |
 
 - With several clips stacked — two mics, a multicam — a moment is only cut when it
   is silent **in all of them**, so nobody gets cut off mid-sentence.
@@ -36,8 +37,14 @@ by default, `-14` for louder social/YouTube delivery. Gain is held back so true 
 stays under −1 dB. Nothing is rendered and the source files are untouched; it's just
 the clip's volume, adjustable afterwards like any other.
 
-Both read the audio straight from the source files with ffmpeg — no transcript and
-no render needed. Clips must be online (file on disk).
+**🔍 Punch-in selected clips** scales every second clip up (110 % by default), so jump
+cuts alternate wide / close instead of looking like skips. The zoom is relative to the
+wide clip before it, so footage scaled to fit (e.g. 4K at 50 % on a 1080 timeline) goes
+50 → 55 %, and running it twice doesn't zoom any further. Clips with keyframed Scale
+are left alone. Works on clips you cut yourself too, not only after Rough Cut.
+
+Rough Cut and Normalize read the audio straight from the source files with ffmpeg — no
+transcript and no render needed. Clips must be online (file on disk).
 
 ---
 

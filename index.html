@@ -169,11 +169,11 @@
     display: flex;
     align-items: center;
     gap: 5px;
-    margin: 4px 0 10px;
+    margin: 4px 0 6px;
     font-size: 10px;
     color: var(--text-dim);
   }
-  button#btnNormalize {
+  button#btnNormalize, button#btnPunch {
     flex: 1;
     background: #3a3a3a;
     border: 1px solid var(--border);
@@ -183,8 +183,8 @@
     padding: 8px;
     cursor: pointer;
   }
-  button#btnNormalize:hover { background: #4a4a4a; }
-  button#btnNormalize:disabled { background: #2b2b2b; color: #666; cursor: default; }
+  button#btnNormalize:hover, button#btnPunch:hover { background: #4a4a4a; }
+  button#btnNormalize:disabled, button#btnPunch:disabled { background: #2b2b2b; color: #666; cursor: default; }
   .norm-row input[type="text"] {
     width: 40px;
     padding: 6px 4px;
@@ -366,11 +366,17 @@
   <div class="rc-opts">
     <label class="rc-chk" title="Slide the rest of the edit left so no empty gaps remain."><input type="checkbox" id="rcClose" checked> Close gaps</label>
     <label class="rc-chk" title="Bring the clips to the loudness target below before cutting."><input type="checkbox" id="rcNorm"> Normalize first</label>
+    <label class="rc-chk" title="Zoom in on every second piece after cutting, using the percentage below."><input type="checkbox" id="rcPunch"> Punch-in</label>
   </div>
   <div class="norm-row">
     <button id="btnNormalize" title="Measures each selected clip's loudness (EBU R128) and sets its Volume so it lands on the target, keeping peaks under -1 dB. Nothing is rendered — it's just the clip's Volume level.">🔊 Normalize selected clips</button>
     <input type="text" id="normTarget" value="-16" title="Loudness target. -16 LUFS suits most online video; -14 is louder (YouTube, social).">
     <span>LUFS</span>
+  </div>
+  <div class="norm-row">
+    <button id="btnPunch" title="Zooms in on every second selected clip, so jump cuts alternate wide / close. Works on clips you cut yourself too. Clips with keyframed Scale are left alone.">🔍 Punch-in selected clips</button>
+    <input type="text" id="punchZoom" value="110" title="Zoom for the punched-in clips, relative to the wide ones. 110–115 % is subtle, 120 %+ is obvious.">
+    <span>%</span>
   </div>
 
   <div class="progress-wrap" id="progressWrap"><div class="progress-bar" id="progressBar"></div></div>
@@ -409,7 +415,7 @@
 
   <!-- the ?v= query defeats CEF's stale script cache — keep it equal to version.json,
        otherwise an auto-update writes a new main.js that the panel never reads -->
-  <script src="js/CSInterface.js?v=1.3.0"></script>
-  <script src="js/main.js?v=1.3.0"></script>
+  <script src="js/CSInterface.js?v=1.4.0"></script>
+  <script src="js/main.js?v=1.4.0"></script>
 </body>
 </html>

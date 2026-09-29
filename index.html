@@ -155,12 +155,41 @@
   button#btnRoughCut:disabled { background: #2b2b2b; color: #666; cursor: default; }
   .rc-opts {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 5px;
     font-size: 10px;
     color: var(--text-dim);
-    margin-bottom: 10px;
+    margin-bottom: 6px;
     padding: 0 2px;
+  }
+  .rc-chk { display: flex; align-items: center; gap: 4px; cursor: pointer; margin-right: 10px; }
+  .rc-chk input { cursor: pointer; }
+  .norm-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 4px 0 10px;
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+  button#btnNormalize {
+    flex: 1;
+    background: #3a3a3a;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: #e0e0e0;
+    font-size: 12px;
+    padding: 8px;
+    cursor: pointer;
+  }
+  button#btnNormalize:hover { background: #4a4a4a; }
+  button#btnNormalize:disabled { background: #2b2b2b; color: #666; cursor: default; }
+  .norm-row input[type="text"] {
+    width: 40px;
+    padding: 6px 4px;
+    font-size: 11px;
+    text-align: center;
   }
   .rc-opts input[type="text"] {
     width: 36px;
@@ -323,13 +352,25 @@
   <button id="btnCancel">✕ Cancel</button>
   <button id="btnSort" title="Sorts loose items from the project root and the assets bin into bins by type (Videos, Audio, Images, Sequences/Comps). Your own bins are not touched.">🗂 Sort project into bins</button>
   <button id="btnPasteImg" title="Saves the screenshot from your clipboard into the assets folder and imports it. Take a screenshot to clipboard first: Cmd+Ctrl+Shift+4 (Mac) / Win+Shift+S (Windows).">📸 Paste screenshot from clipboard</button>
-  <button id="btnRoughCut" title="Detects silence in the selected clip and removes those sections from the timeline. Select a clip first, then click.">✂ Rough Cut (remove silence)</button>
+  <button id="btnRoughCut" title="Removes the silences from every selected clip. With several clips stacked (two mics, multicam), a moment is only cut when it's silent in all of them. The original sequence is kept as a copy.">✂ Rough Cut selected clips</button>
   <div class="rc-opts">
-    <span>Threshold:</span>
-    <input type="text" id="rcThreshold" value="-30"> <span>dB</span>
-    <span class="rc-sep">&nbsp;·&nbsp;</span>
-    <span>Min silence:</span>
-    <input type="text" id="rcMinDur" value="0.5"> <span>s</span>
+    <span title="Anything quieter than this counts as silence. Raise it (e.g. -25) for noisy rooms.">Threshold</span>
+    <input type="text" id="rcThreshold" value="-30"><span>dB</span>
+    <span class="rc-sep">·</span>
+    <span title="Pauses shorter than this are kept.">Min silence</span>
+    <input type="text" id="rcMinDur" value="0.5"><span>s</span>
+    <span class="rc-sep">·</span>
+    <span title="Kept on both sides of every cut, so words aren't clipped.">Pad</span>
+    <input type="text" id="rcPad" value="0.1"><span>s</span>
+  </div>
+  <div class="rc-opts">
+    <label class="rc-chk" title="Slide the rest of the edit left so no empty gaps remain."><input type="checkbox" id="rcClose" checked> Close gaps</label>
+    <label class="rc-chk" title="Bring the clips to the loudness target below before cutting."><input type="checkbox" id="rcNorm"> Normalize first</label>
+  </div>
+  <div class="norm-row">
+    <button id="btnNormalize" title="Measures each selected clip's loudness (EBU R128) and sets its Volume so it lands on the target, keeping peaks under -1 dB. Nothing is rendered — it's just the clip's Volume level.">🔊 Normalize selected clips</button>
+    <input type="text" id="normTarget" value="-16" title="Loudness target. -16 LUFS suits most online video; -14 is louder (YouTube, social).">
+    <span>LUFS</span>
   </div>
 
   <div class="progress-wrap" id="progressWrap"><div class="progress-bar" id="progressBar"></div></div>
@@ -368,7 +409,7 @@
 
   <!-- the ?v= query defeats CEF's stale script cache — keep it equal to version.json,
        otherwise an auto-update writes a new main.js that the panel never reads -->
-  <script src="js/CSInterface.js?v=1.2.2"></script>
-  <script src="js/main.js?v=1.2.2"></script>
+  <script src="js/CSInterface.js?v=1.3.0"></script>
+  <script src="js/main.js?v=1.3.0"></script>
 </body>
 </html>

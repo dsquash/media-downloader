@@ -130,131 +130,268 @@ function ytImportAE(f, insertAtPlayhead) {
     }
 }
 
-/* ---------- Rough Cut ---------- */
+/* ---------- Rough Cut + Normalize ---------- */
 
-function ytGetSelectedClips() {
-    if (ytIsAE()) return "[]";
-    try {
-        var seq = app.project.activeSequence;
-        if (!seq) return "[]";
-        var result = [];
-        var i, j, track, clip, fp;
-        for (i = 0; i < seq.videoTracks.numTracks; i++) {
-            track = seq.videoTracks[i];
-            for (j = 0; j < track.clips.numItems; j++) {
-                clip = track.clips[j];
-                try {
-                    if (!clip.selected) continue;
-                    fp = clip.projectItem.getMediaPath();
-                    if (!fp) continue;
-                    result.push({
-                        filePath: fp,
-                        seqStart:  clip.start.seconds,
-                        seqEnd:    clip.end.seconds,
-                        inPoint:   clip.inPoint.seconds,
-                        outPoint:  clip.outPoint.seconds,
-                        videoTrackIndex: i
-                    });
-                } catch (e) {}
-            }
-        }
-        return JSON.stringify(result);
-    } catch (e2) { return "[]"; }
+/* ExtendScript is ES3 and has no JSON object of its own */
+function ytStr(v) {
+    if (v === null || v === undefined) return "null";
+    var t = typeof v, i, a;
+    if (t === "number") return isFinite(v) ? String(v) : "null";
+    if (t === "boolean") return v ? "true" : "false";
+    if (t === "string") {
+        return '"' + v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+                      .replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t") + '"';
+    }
+    if (v instanceof Array) {
+        a = [];
+        for (i = 0; i < v.length; i++) a.push(ytStr(v[i]));
+        return "[" + a.join(",") + "]";
+    }
+    a = [];
+    for (var k in v) if (v.hasOwnProperty(k)) a.push(ytStr(k) + ":" + ytStr(v[k]));
+    return "{" + a.join(",") + "}";
 }
 
-function ytApplyRoughCut(dataJson) {
-    if (ytIsAE()) return "Rough Cut is only available in Premiere Pro.";
+function ytSelected(c) {
+    try { return (typeof c.isSelected === "function") ? c.isSelected() : !!c.selected; }
+    catch (e) { return false; }
+}
+
+function ytGetSelectedClips() {
+    if (ytIsAE()) return ytStr({ error: "This only works in Premiere Pro." });
     try {
         var seq = app.project.activeSequence;
-        if (!seq) return "No active sequence.";
+        if (!seq) return ytStr({ error: "Open a sequence first." });
+        var items = [], skipped = 0, unlinked = 0;
 
-        var data = eval("(" + dataJson + ")");
-        var silences = data.silences;
-        var clips    = data.clips;
+        function scan(tracks, kind) {
+            for (var ti = 0; ti < tracks.numTracks; ti++) {
+                var clips = tracks[ti].clips;
+                for (var ci = 0; ci < clips.numItems; ci++) {
+                    var c = clips[ci];
+                    if (!ytSelected(c)) continue;
+                    var fp = "";
+                    try { fp = c.projectItem ? c.projectItem.getMediaPath() : ""; } catch (e) {}
+                    if (!fp) { skipped++; continue; } // titles, nested sequences, adjustment layers
 
-        if (!silences || !silences.length) return "No silence detected — nothing to cut.";
-        if (!clips    || !clips.length)    return "No clip data received.";
+                    // a linked partner left unselected would fall out of sync once gaps close
+                    try {
+                        var li = c.getLinkedItems ? c.getLinkedItems() : null;
+                        for (var q = 0; li && q < li.numItems; q++) if (!ytSelected(li[q])) unlinked++;
+                    } catch (e2) {}
 
-        // Which video track indices hold the selected clips
-        var trackSet = {};
-        var ci, si;
-        for (ci = 0; ci < clips.length; ci++) trackSet[clips[ci].videoTrackIndex] = true;
+                    var speed = 1, reversed = false;
+                    try { speed = c.getSpeed() || 1; } catch (e3) {}
+                    try { reversed = c.isSpeedReversed() ? true : false; } catch (e4) {}
 
-        // Map source-file silence intervals to sequence time for each selected clip
-        var cutIntervals = [];
-        var clip, sil, srcIn, srcOut, seqIn, seqOut;
-        for (ci = 0; ci < clips.length; ci++) {
-            clip = clips[ci];
-            for (si = 0; si < silences.length; si++) {
-                sil    = silences[si];
-                srcIn  = Math.max(sil.start, clip.inPoint);
-                srcOut = Math.min(sil.end,   clip.outPoint);
-                if (srcOut - srcIn < 0.05) continue; // skip trivially short silences
-                seqIn  = clip.seqStart + (srcIn  - clip.inPoint);
-                seqOut = clip.seqStart + (srcOut - clip.inPoint);
-                seqIn  = Math.max(seqIn,  clip.seqStart);
-                seqOut = Math.min(seqOut, clip.seqEnd);
-                if (seqOut - seqIn < 0.05) continue;
-                cutIntervals.push({ start: seqIn, end: seqOut });
+                    items.push({
+                        kind: kind, track: ti, filePath: fp,
+                        seqStart: c.start.seconds, seqEnd: c.end.seconds,
+                        inPoint: c.inPoint.seconds, outPoint: c.outPoint.seconds,
+                        speed: Math.abs(speed), reversed: reversed
+                    });
+                }
             }
         }
-        if (!cutIntervals.length) return "No silence found within the selected clip's range.";
+        scan(seq.videoTracks, "video");
+        scan(seq.audioTracks, "audio");
 
-        // Razor-cut the involved video + audio tracks at every silence boundary
-        var i, j, t;
-        var targetTracks = [];
-        for (i = 0; i < seq.videoTracks.numTracks; i++) {
-            if (trackSet[i]) targetTracks.push(seq.videoTracks[i]);
+        var frame = 1 / 25;
+        try { frame = seq.getSettings().videoFrameRate.seconds || frame; } catch (e5) {}
+        return ytStr({ items: items, skipped: skipped, unlinked: unlinked, frame: frame });
+    } catch (err) {
+        return ytStr({ error: "Could not read the selection: " + err });
+    }
+}
+
+/* Volume > Level of an audio track item; the first "Volume" component, not Channel Volume */
+function ytVolumeLevel(clip) {
+    var comps = clip.components;
+    for (var i = 0; i < comps.numItems; i++) {
+        var c = comps[i], mn = String(c.matchName || ""), dn = String(c.displayName || "");
+        if (/channel/i.test(mn) || !(/volume/i.test(mn) || /^vol/i.test(dn))) continue;
+        for (var j = 0; j < c.properties.numItems; j++) {
+            if (/level|nivel|pegel|niveau/i.test(String(c.properties[j].displayName))) return c.properties[j];
         }
-        for (i = 0; i < seq.audioTracks.numTracks; i++) {
-            if (trackSet[i]) targetTracks.push(seq.audioTracks[i]);
+        if (c.properties.numItems > 1) return c.properties[1]; // [0] is Bypass
+    }
+    return null;
+}
+
+function ytSetClipGain(json) {
+    if (ytIsAE()) return ytStr({ error: "Normalize is only available in Premiere Pro." });
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return ytStr({ error: "No active sequence." });
+        var list = eval("(" + json + ")"), done = 0, failed = 0, capped = 0;
+        for (var i = 0; i < list.length; i++) {
+            var g = list[i], tr = seq.audioTracks[g.track], clip = null;
+            for (var j = 0; tr && j < tr.clips.numItems; j++) {
+                if (Math.abs(tr.clips[j].start.seconds - g.seqStart) < 0.01) { clip = tr.clips[j]; break; }
+            }
+            var prop = clip ? ytVolumeLevel(clip) : null;
+            if (!prop) { failed++; continue; }
+            var db = g.gain;
+            if (db > 15) { db = 15; capped++; }
+            // Premiere keeps Level as linear gain scaled so that 1.0 = +15 dB (its maximum)
+            try { prop.setValue(Math.pow(10, (db - 15) / 20), true); done++; } catch (e) { failed++; }
+        }
+        return ytStr({ done: done, failed: failed, capped: capped });
+    } catch (err) {
+        return ytStr({ error: "Normalize failed: " + err });
+    }
+}
+
+/* cuts: frame-aligned [{s, e}] in sequence seconds, ascending.
+   video/audio: indices of the tracks holding the selection. */
+function ytApplyRoughCut(dataJson) {
+    if (ytIsAE()) return ytStr({ error: "Rough Cut is only available in Premiere Pro." });
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return ytStr({ error: "No active sequence." });
+        var d = eval("(" + dataJson + ")");
+        var tol = d.frame * 0.5 + 0.0005;
+        var i, j, k;
+
+        function targetTracks() {
+            var s = app.project.activeSequence, out = [], n;
+            for (n = 0; n < d.video.length; n++) out.push({ t: s.videoTracks[d.video[n]], v: true, idx: d.video[n] });
+            for (n = 0; n < d.audio.length; n++) out.push({ t: s.audioTracks[d.audio[n]], v: false, idx: d.audio[n] });
+            return out;
+        }
+        var tracks = targetTracks();
+
+        // 1. Only cut where every target track holds nothing or selected material —
+        //    otherwise closing the gap would drag unselected clips along or split them.
+        var cuts = [], skipped = 0;
+        for (k = 0; k < d.cuts.length; k++) {
+            var c = d.cuts[k], ok = true;
+            for (i = 0; i < tracks.length && ok; i++) {
+                var cl = tracks[i].t.clips;
+                for (j = 0; j < cl.numItems; j++) {
+                    var it = cl[j];
+                    if (it.end.seconds <= c.s + tol || it.start.seconds >= c.e - tol) continue;
+                    if (!ytSelected(it)) { ok = false; break; }
+                }
+            }
+            if (ok) cuts.push(c); else skipped++;
+        }
+        if (!cuts.length) {
+            return ytStr({ error: "Every silent section overlaps unselected clips on the same tracks — select those too." });
         }
 
-        for (i = 0; i < cutIntervals.length; i++) {
-            t = new Time(); t.seconds = cutIntervals[i].start;
-            try { seq.razorAtTime(t, targetTracks); } catch (re) {}
-            t = new Time(); t.seconds = cutIntervals[i].end;
-            try { seq.razorAtTime(t, targetTracks); } catch (re) {}
-        }
+        // 2. Backup: the original stays the active sequence, an untouched copy lands in the project.
+        var backup = "", id = seq.sequenceID, name = seq.name;
+        try {
+            if (seq.clone()) backup = name + " Copy";
+            if (app.project.activeSequence.sequenceID !== id) app.project.openSequence(id);
+        } catch (eB) {}
+        seq = app.project.activeSequence;
+        tracks = targetTracks();
 
-        // Identify clips that now fall entirely inside a silence zone
-        function inSilenceZone(cs, ce) {
-            for (var k = 0; k < cutIntervals.length; k++) {
-                if (cs >= cutIntervals[k].start - 0.02 && ce <= cutIntervals[k].end + 0.02) return true;
+        // 3. Razor. The QE DOM is the only razor Premiere exposes to scripts; it takes
+        //    a timecode string, so every cut edge is already frame-aligned by the panel.
+        app.enableQE();
+        var qs = qe.project.getActiveSequence();
+        var st = seq.getSettings();
+        var zp = 0;
+        try { zp = parseFloat(seq.zeroPoint) / 254016000000; } catch (eZ) {}
+
+        function razorAll(sec, offset) {
+            var t = new Time();
+            t.seconds = sec + offset;
+            var code = t.getFormatted(st.videoFrameRate, st.videoDisplayFormat);
+            for (var n = 0; n < tracks.length; n++) {
+                try {
+                    (tracks[n].v ? qs.getVideoTrackAt(tracks[n].idx) : qs.getAudioTrackAt(tracks[n].idx)).razor(code);
+                } catch (eR) {}
+            }
+        }
+        function edgeAt(sec) {
+            for (var n = 0; n < tracks.length; n++) {
+                var cc = tracks[n].t.clips;
+                for (var m = 0; m < cc.numItems; m++) {
+                    if (Math.abs(cc[m].start.seconds - sec) < tol || Math.abs(cc[m].end.seconds - sec) < tol) return true;
+                }
             }
             return false;
         }
 
-        var toRemove = [];
-        var track, clip2;
-        for (i = 0; i < seq.videoTracks.numTracks; i++) {
-            if (!trackSet[i]) continue;
-            track = seq.videoTracks[i];
-            for (j = 0; j < track.clips.numItems; j++) {
-                clip2 = track.clips[j];
-                try { if (inSilenceZone(clip2.start.seconds, clip2.end.seconds)) toRemove.push(clip2); } catch (e) {}
+        // Whether razor() wants timecode relative to the sequence's start timecode is not
+        // documented; try it, and if the first edge didn't land, fall back to plain time.
+        razorAll(cuts[0].s, zp);
+        if (zp && !edgeAt(cuts[0].s)) { zp = 0; razorAll(cuts[0].s, 0); }
+        razorAll(cuts[0].e, zp);
+        for (k = 1; k < cuts.length; k++) { razorAll(cuts[k].s, zp); razorAll(cuts[k].e, zp); }
+
+        // 4. Remove the silent pieces. A cut only counts if every overlapping piece on
+        //    every target track now sits fully inside it — a razor that missed one track
+        //    would otherwise leave that track out of step with the rest.
+        var removed = 0, missed = 0, applied = [];
+        for (k = 0; k < cuts.length; k++) {
+            var cut = cuts[k], batch = [], bad = false;
+            for (i = 0; i < tracks.length && !bad; i++) {
+                var cl2 = tracks[i].t.clips;
+                for (j = 0; j < cl2.numItems; j++) {
+                    var p = cl2[j], ps = p.start.seconds, pe = p.end.seconds;
+                    if (pe <= cut.s + tol || ps >= cut.e - tol) continue;
+                    if (ps >= cut.s - tol && pe <= cut.e + tol) batch.push(p); else { bad = true; break; }
+                }
             }
-        }
-        for (i = 0; i < seq.audioTracks.numTracks; i++) {
-            if (!trackSet[i]) continue;
-            track = seq.audioTracks[i];
-            for (j = 0; j < track.clips.numItems; j++) {
-                clip2 = track.clips[j];
-                try { if (inSilenceZone(clip2.start.seconds, clip2.end.seconds)) toRemove.push(clip2); } catch (e) {}
+            if (bad || !batch.length) { missed++; continue; }
+            for (j = 0; j < batch.length; j++) {
+                try { batch[j].remove(false, false); removed++; } catch (eX) {}
             }
+            applied.push(cut);
         }
 
-        var removed = 0;
-        // remove(ripple=false, alignToVideo=false) — leaves gaps so nothing else shifts
-        for (i = 0; i < toRemove.length; i++) {
-            try { toRemove[i].remove(false, false); removed++; } catch (e) {}
-        }
+        var saved = 0;
+        for (k = 0; k < applied.length; k++) saved += applied[k].e - applied[k].s;
+        var closed = d.close && applied.length ? ytCloseGaps(tracks, applied, tol) : false;
 
-        return "✔ Rough cut: removed " + removed + " silent segment(s) from " +
-               cutIntervals.length + " silence interval(s). Gaps left in place — use Edit > Ripple Delete to close them.";
-    } catch (e) {
-        return "Rough cut failed: " + String(e);
+        return ytStr({ applied: applied.length, removed: removed, skipped: skipped, missed: missed,
+                       saved: saved, closed: closed, backup: backup });
+    } catch (err) {
+        return ytStr({ error: "Rough cut failed: " + err });
     }
+}
+
+/* Slide everything after each removed section left, on the target tracks only.
+   Done by hand rather than with ripple-delete because the API's ripple behaviour
+   across linked, multi-track selections isn't documented; this way every track
+   moves by exactly the same amount and stays in sync. */
+function ytCloseGaps(tracks, cuts, tol) {
+    function shiftAt(t) {
+        var s = 0;
+        for (var k = 0; k < cuts.length; k++) if (cuts[k].e <= t + tol) s += cuts[k].e - cuts[k].s;
+        return s;
+    }
+    var plan = [], i, j;
+    for (i = 0; i < tracks.length; i++) {
+        var cl = tracks[i].t.clips;
+        for (j = 0; j < cl.numItems; j++) {
+            var st = cl[j].start.seconds, sh = shiftAt(st);
+            if (sh > tol) plan.push({ ti: i, j: j, target: st - sh });
+        }
+    }
+    // Leftmost destination first, so nothing is ever moved onto a clip that hasn't
+    // moved yet. Each move aims at an absolute target: moving a clip may drag its
+    // linked partner along, and then the partner's own turn is simply a no-op.
+    plan.sort(function (a, b) { return a.target - b.target; });
+    for (i = 0; i < plan.length; i++) {
+        var it = tracks[plan[i].ti].t.clips[plan[i].j];
+        if (!it) continue;
+        var delta = plan[i].target - it.start.seconds;
+        if (Math.abs(delta) < tol) continue;
+        var t = new Time();
+        t.seconds = delta;
+        try { it.move(t); } catch (e) {}
+    }
+    for (i = 0; i < plan.length; i++) {
+        var it2 = tracks[plan[i].ti].t.clips[plan[i].j];
+        if (!it2 || Math.abs(it2.start.seconds - plan[i].target) > tol) return false;
+    }
+    return true;
 }
 
 /* ---------- Sort project items into bins by type ---------- */

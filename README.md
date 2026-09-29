@@ -4,8 +4,40 @@ A panel for **Adobe Premiere Pro** and **After Effects** that downloads video fr
 YouTube, TikTok, Instagram and ~1000 other sites straight into your project's
 `assets` folder, imports it, and drops it on the timeline at the playhead.
 
-Also on board: **Rough Cut** (removes silence from a selected clip), **Sort project
+Also on board: **Rough Cut** and **Normalize** for selected clips, **Sort project
 into bins**, and **Paste screenshot from clipboard**.
+
+---
+
+## Rough Cut & Normalize (Premiere Pro)
+
+Select one or more clips on the timeline — linked video and audio together — and:
+
+**✂ Rough Cut selected clips** removes the silences.
+
+| Setting | |
+|---|---|
+| Threshold | quieter than this counts as silence. Raise it (e.g. `-25`) for noisy rooms |
+| Min silence | pauses shorter than this are kept |
+| Pad | kept on both sides of every cut, so words aren't clipped |
+| Close gaps | slides the rest of the edit left; off leaves the gaps in place |
+| Normalize first | applies Normalize (below) before cutting, so every piece gets the same volume |
+
+- With several clips stacked — two mics, a multicam — a moment is only cut when it
+  is silent **in all of them**, so nobody gets cut off mid-sentence.
+- Silent sections that overlap *unselected* clips on the same tracks are skipped,
+  never cut through.
+- The original sequence is kept as **"<name> Copy"** in the project before anything
+  is changed.
+
+**🔊 Normalize selected clips** measures each clip's loudness (EBU R128, only the part
+used on the timeline) and sets its **Volume → Level** to reach the target — `-16 LUFS`
+by default, `-14` for louder social/YouTube delivery. Gain is held back so true peak
+stays under −1 dB. Nothing is rendered and the source files are untouched; it's just
+the clip's volume, adjustable afterwards like any other.
+
+Both read the audio straight from the source files with ffmpeg — no transcript and
+no render needed. Clips must be online (file on disk).
 
 ---
 

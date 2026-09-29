@@ -772,107 +772,290 @@ function setBusy(busy) {
 
 elPasteImg.addEventListener("click", pasteScreenshot);
 
-/* ---------- Rough Cut ---------- */
+/* ---------- Rough Cut + Normalize ----------
+   Both work on whatever is selected in the timeline — any number of clips, on any
+   tracks. The audio is analysed by ffmpeg straight from the source files, only the
+   part each clip actually uses, so no transcript and no render is needed. */
+
+var elRcPad = document.getElementById("rcPad");
+var elRcClose = document.getElementById("rcClose");
+var elRcNorm = document.getElementById("rcNorm");
+var elNormalize = document.getElementById("btnNormalize");
+var elNormTarget = document.getElementById("normTarget");
+
+function numIn(el, def) {
+    var v = parseFloat(String(el.value).replace(",", "."));
+    return isFinite(v) ? v : def;
+}
+
+function setToolsBusy(busy) {
+    elRoughCut.disabled = busy;
+    elNormalize.disabled = busy;
+    elProgressWrap.style.display = busy ? "block" : "none";
+    if (busy) elProgressBar.style.width = "0%";
+}
+
+function toolsDone(msg, isErr) {
+    setToolsBusy(false);
+    setStatus(msg, isErr ? "err" : "ok");
+}
+
+function getSelection(cb) {
+    cs.evalScript("ytGetSelectedClips()", function (res) {
+        var sel;
+        try { sel = JSON.parse(res); } catch (e) { sel = { error: "Could not read the timeline selection." }; }
+        if (!sel.error && (!sel.items || !sel.items.length)) {
+            sel.error = "Select one or more clips on the timeline first.";
+        }
+        cb(sel);
+    });
+}
+
+/* One ffmpeg pass per source range, with silencedetect and/or ebur128 chained on
+   the audio alone (-vn: the video is never decoded, which is most of the cost).
+   -ss/-t before -i limit the work to the clip's in/out; timestamps then start at 0. */
+function analyzeRange(src, opts, onProgress, cb) {
+    var dur = Math.max(0.01, src.outPoint - src.inPoint);
+    var filters = [];
+    if (opts.silence) filters.push("silencedetect=noise=" + opts.noise + ":d=" + opts.minDur);
+    if (opts.loudness) filters.push("ebur128=peak=true");
+    var args = ["-hide_banner", "-ss", String(src.inPoint), "-t", String(dur), "-i", src.filePath,
+                "-vn", "-sn", "-dn", "-af", filters.join(","), "-f", "null", "-"];
+
+    var proc = cp.spawn(findBinary("ffmpeg"), args);
+    currentProc = proc;
+    var out = "";
+    proc.stderr.on("data", function (d) {
+        var chunk = d.toString();
+        out += chunk;
+        var tm = chunk.match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/);
+        if (tm) onProgress(Math.min(1, ((+tm[1]) * 3600 + (+tm[2]) * 60 + (+tm[3])) / dur));
+    });
+    proc.stdout.on("data", function () {});
+    proc.on("error", function (err) { currentProc = null; cb("ffmpeg: " + err.message); });
+    proc.on("close", function () {
+        currentProc = null;
+        var r = { noAudio: !/Stream #[^\n]*Audio:/.test(out), sil: [], lufs: null, peak: null };
+        if (r.noAudio) { cb(null, r); return; }
+
+        if (opts.silence) {
+            var m, starts = [], ends = [];
+            var reS = /silence_start:\s*(-?[\d.]+)/g, reE = /silence_end:\s*(-?[\d.]+)/g;
+            while ((m = reS.exec(out))) starts.push(parseFloat(m[1]));
+            while ((m = reE.exec(out))) ends.push(parseFloat(m[1]));
+            for (var i = 0; i < starts.length; i++) {
+                r.sil.push({ s: src.inPoint + Math.max(0, starts[i]),
+                             e: src.inPoint + (i < ends.length ? ends[i] : dur) });
+            }
+        }
+        if (opts.loudness) {
+            // per-frame lines also carry "I:", the summary is always the last one
+            var li = out.match(/\bI:\s+-?[\d.]+ LUFS/g);
+            var pk = out.match(/Peak:\s+(-?[\d.]+|-inf) dBFS/g);
+            if (li) r.lufs = parseFloat(li[li.length - 1].match(/-?[\d.]+/)[0]);
+            if (pk) {
+                var pv = pk[pk.length - 1].match(/(-?[\d.]+|-inf) dBFS/)[1];
+                r.peak = pv === "-inf" ? -Infinity : parseFloat(pv);
+            }
+        }
+        cb(null, r);
+    });
+}
+
+/* Linked video + audio of one clip read the same range of the same file — analyse it once. */
+function analyzeAll(items, opts, cb) {
+    var jobs = [], seen = {}, results = {};
+    items.forEach(function (it) {
+        it.key = it.filePath + "|" + it.inPoint.toFixed(3) + "|" + it.outPoint.toFixed(3);
+        if (!seen[it.key]) { seen[it.key] = true; jobs.push(it); }
+    });
+    var i = 0;
+    (function next() {
+        if (i >= jobs.length) { cb(null, results); return; }
+        var job = jobs[i];
+        if (!fs.existsSync(job.filePath)) { cb("Source file not found (offline?): " + job.filePath); return; }
+        setStatus("Analysing audio " + (i + 1) + " / " + jobs.length + " — " + path.basename(job.filePath) + "…");
+        analyzeRange(job, opts, function (f) {
+            elProgressBar.style.width = Math.round((i + f) / jobs.length * 100) + "%";
+        }, function (err, r) {
+            if (err) { cb(err); return; }
+            results[job.key] = r;
+            i++;
+            next();
+        });
+    })();
+}
+
+function toSeq(it, t) { return it.seqStart + (t - it.inPoint) / (it.speed || 1); }
+
+/* A moment is cut only if it is silent in EVERY selected clip that covers it — so
+   with two mics or a multicam, nothing goes while anyone is talking. Clips with no
+   audio of their own (b-roll, reversed clips) follow the cut but have no say in it. */
+function computeCuts(items, results, minDur, pad, frame) {
+    var voters = [];
+    items.forEach(function (it) {
+        var r = results[it.key];
+        if (!r || r.noAudio || it.reversed) return;
+        voters.push({ a: it.seqStart, b: it.seqEnd, sil: r.sil.map(function (s) {
+            return { s: Math.max(it.seqStart, toSeq(it, s.s)), e: Math.min(it.seqEnd, toSeq(it, s.e)) };
+        }) });
+    });
+    if (!voters.length) return [];
+
+    var pts = [];
+    voters.forEach(function (v) {
+        pts.push(v.a, v.b);
+        v.sil.forEach(function (s) { pts.push(s.s, s.e); });
+    });
+    pts.sort(function (x, y) { return x - y; });
+
+    var raw = [];
+    for (var i = 0; i + 1 < pts.length; i++) {
+        var a = pts[i], b = pts[i + 1];
+        if (b - a < 1e-6) continue;
+        var m = (a + b) / 2, covered = false, silent = true;
+        voters.forEach(function (v) {
+            if (m < v.a || m >= v.b) return;
+            covered = true;
+            if (!v.sil.some(function (s) { return m >= s.s && m < s.e; })) silent = false;
+        });
+        if (!covered || !silent) continue;
+        var last = raw[raw.length - 1];
+        if (last && a - last.e < 1e-6) last.e = b; else raw.push({ s: a, e: b });
+    }
+
+    // pad keeps a breath around the words; edges snap inward to whole frames,
+    // which is where Premiere's razor lands anyway
+    var cuts = [];
+    raw.forEach(function (c) {
+        if (c.e - c.s < minDur) return;
+        var s = Math.ceil((c.s + pad) / frame - 1e-6) * frame;
+        var e = Math.floor((c.e - pad) / frame + 1e-6) * frame;
+        if (e - s >= frame) cuts.push({ s: s, e: e });
+    });
+    return cuts;
+}
+
+/* Gain to reach the loudness target, held back so the true peak stays under -1 dBTP —
+   no limiter is involved, so going louder than that would clip. */
+function gainFor(r, target) {
+    if (!r || r.noAudio || r.lufs === null || r.lufs < -60) return null;
+    var g = target - r.lufs;
+    if (r.peak !== null && isFinite(r.peak)) g = Math.min(g, -1 - r.peak);
+    return Math.round(g * 10) / 10;
+}
+
+function applyGain(items, results, target, cb) {
+    var list = [];
+    items.forEach(function (it) {
+        if (it.kind !== "audio") return;
+        var g = gainFor(results[it.key], target);
+        if (g !== null) list.push({ track: it.track, seqStart: it.seqStart, gain: g });
+    });
+    if (!list.length) { cb("None of the selected clips has measurable audio."); return; }
+    setStatus("Setting clip volume…");
+    cs.evalScript("ytSetClipGain(" + JSON.stringify(JSON.stringify(list)) + ")", function (res) {
+        var r;
+        try { r = JSON.parse(res); } catch (e) { cb("Premiere did not answer: " + res); return; }
+        if (r.error) { cb(r.error); return; }
+        var gains = list.map(function (x) { return x.gain; });
+        var lo = Math.min.apply(null, gains), hi = Math.max.apply(null, gains);
+        var fmt = function (g) { return (g > 0 ? "+" : "") + g.toFixed(1); };
+        var msg = "Normalized " + r.done + " clip(s) to " + target + " LUFS (" +
+                  (lo === hi ? fmt(lo) : fmt(lo) + " … " + fmt(hi)) + " dB).";
+        if (r.capped) msg += " " + r.capped + " capped at +15 dB, Premiere's maximum.";
+        if (r.failed) msg += " " + r.failed + " could not be changed.";
+        cb(null, msg);
+    });
+}
+
+function fmtDur(s) {
+    if (s < 60) return s.toFixed(1) + "s";
+    var m = Math.floor(s / 60), r = Math.round(s - m * 60);
+    return m + ":" + (r < 10 ? "0" : "") + r;
+}
+
+function uniqTracks(items, kind) {
+    var seen = {}, out = [];
+    items.forEach(function (it) {
+        if (it.kind === kind && !seen[it.track]) { seen[it.track] = true; out.push(it.track); }
+    });
+    return out;
+}
 
 function roughCut() {
-    var ffmpeg = findBinary("ffmpeg");
-    var threshold = (elRcThreshold.value || "-30").trim();
-    var minDur = (elRcMinDur.value || "0.5").trim();
-    // add "dB" suffix if the user typed a bare number like -30
-    var noiseArg = /^-?\d+(\.\d+)?$/.test(threshold) ? threshold + "dB" : threshold;
+    var noiseRaw = String(elRcThreshold.value || "-30").trim();
+    var noise = /^-?\d+(\.\d+)?$/.test(noiseRaw) ? noiseRaw + "dB" : noiseRaw;
+    var minDur = Math.max(0.1, numIn(elRcMinDur, 0.5));
+    var pad = Math.max(0, numIn(elRcPad, 0.1));
+    var close = elRcClose.checked, norm = elRcNorm.checked;
+    var target = numIn(elNormTarget, -16);
 
-    elRoughCut.disabled = true;
-    setStatus("Getting selected clips…");
-
-    cs.evalScript("ytGetSelectedClips()", function (res) {
-        var clips;
-        try { clips = JSON.parse(res || "[]"); } catch (e) { clips = []; }
-
-        if (!clips.length) {
-            elRoughCut.disabled = false;
-            setStatus("Select a clip on the timeline first, then click Rough Cut.", "err");
+    setToolsBusy(true);
+    setStatus("Reading the selection…");
+    getSelection(function (sel) {
+        if (sel.error) { toolsDone(sel.error, true); return; }
+        if (sel.unlinked && close) {
+            toolsDone("Some selected clips have linked video/audio that isn't selected. Select it too " +
+                      "(or turn on Linked Selection) — otherwise it falls out of sync.", true);
             return;
         }
+        analyzeAll(sel.items, { silence: true, noise: noise, minDur: minDur, loudness: norm }, function (err, results) {
+            if (err) { toolsDone(err, true); return; }
+            var cuts = computeCuts(sel.items, results, minDur, pad, sel.frame);
 
-        var sourceFile = clips[0].filePath;
-        if (!sourceFile || !fs.existsSync(sourceFile)) {
-            elRoughCut.disabled = false;
-            setStatus("Source file not found on disk — offline clips are not supported.", "err");
-            return;
-        }
-
-        setStatus("Detecting silence in " + path.basename(sourceFile) + "…");
-        elProgressWrap.style.display = "block";
-        elProgressBar.style.width = "0%";
-
-        var args = ["-hide_banner", "-i", sourceFile,
-                    "-af", "silencedetect=noise=" + noiseArg + ":d=" + minDur,
-                    "-f", "null", "-"];
-
-        var proc = cp.spawn(ffmpeg, args);
-        currentProc = proc;
-        var output = "";
-        var totalDur = 0;
-
-        function onChunk(d) {
-            var chunk = d.toString();
-            output += chunk;
-            // grab total duration once
-            if (!totalDur) {
-                var dm = output.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
-                if (dm) totalDur = (+dm[1]) * 3600 + (+dm[2]) * 60 + (+dm[3]);
+            function cut(prefix) {
+                if (!cuts.length) {
+                    toolsDone(prefix + "No silence found (threshold " + noise + ", min " + minDur +
+                              "s). Try a higher threshold, e.g. -25.", false);
+                    return;
+                }
+                setStatus(prefix + "Cutting " + cuts.length + " silent section(s)…");
+                var payload = { cuts: cuts, frame: sel.frame, close: close,
+                                video: uniqTracks(sel.items, "video"), audio: uniqTracks(sel.items, "audio") };
+                cs.evalScript("ytApplyRoughCut(" + JSON.stringify(JSON.stringify(payload)) + ")", function (res) {
+                    var r;
+                    try { r = JSON.parse(res); } catch (e) { toolsDone("Rough cut failed: " + res, true); return; }
+                    if (r.error) { toolsDone(prefix + r.error, true); return; }
+                    var msg = "✔ Cut " + r.applied + " silent section(s)";
+                    msg += close && r.closed ? " — " + fmtDur(r.saved) + " shorter." : ", gaps left in place.";
+                    if (close && !r.closed) msg += " Some gaps could not be closed: Sequence → Close Gap.";
+                    if (r.skipped) msg += " " + r.skipped + " skipped (unselected clips on the same tracks).";
+                    if (r.missed) msg += " " + r.missed + " could not be cut cleanly and were left alone.";
+                    if (r.backup) msg += " Original kept as “" + r.backup + "”.";
+                    toolsDone(prefix + msg, false);
+                });
             }
-            // show progress
-            var tm = chunk.match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/);
-            if (tm && totalDur) {
-                var cur = (+tm[1]) * 3600 + (+tm[2]) * 60 + (+tm[3]);
-                elProgressBar.style.width = Math.min(99, Math.round(cur / totalDur * 100)) + "%";
-            }
-        }
-        proc.stdout.on("data", onChunk);
-        proc.stderr.on("data", onChunk);
 
-        proc.on("error", function (err) {
-            currentProc = null;
-            elRoughCut.disabled = false;
-            elProgressWrap.style.display = "none";
-            setStatus("ffmpeg error: " + err.message, "err");
+            // normalize before razoring, so every piece inherits the same volume
+            if (!norm) { cut(""); return; }
+            applyGain(sel.items, results, target, function (e2, normMsg) {
+                if (e2) { toolsDone(e2, true); return; }
+                cut(normMsg + " ");
+            });
         });
+    });
+}
 
-        proc.on("close", function () {
-            currentProc = null;
-            elProgressWrap.style.display = "none";
-
-            // parse silence_start / silence_end pairs from ffmpeg silencedetect output
-            var silences = [];
-            var reStart = /silence_start:\s*([\d.e+\-]+)/g;
-            var reEnd   = /silence_end:\s*([\d.e+\-]+)/g;
-            var starts = [], ends = [], m;
-            while ((m = reStart.exec(output)) !== null) starts.push(parseFloat(m[1]));
-            while ((m = reEnd.exec(output)) !== null)   ends.push(parseFloat(m[1]));
-            for (var i = 0; i < starts.length; i++) {
-                silences.push({ start: starts[i], end: i < ends.length ? ends[i] : 999999 });
-            }
-
-            if (!silences.length) {
-                elRoughCut.disabled = false;
-                setStatus("No silence detected (threshold " + noiseArg + ", min " + minDur + "s). Try a higher threshold (e.g. -25).", "ok");
-                return;
-            }
-
-            setStatus("Found " + silences.length + " silent section(s) — applying cuts…");
-            var dataJson = JSON.stringify({ silences: silences, clips: clips });
-            cs.evalScript("ytApplyRoughCut(" + JSON.stringify(dataJson) + ")", function (result) {
-                elRoughCut.disabled = false;
-                if (!result || result === "undefined") result = "Rough cut complete.";
-                var isErr = /failed|error|only available/i.test(result);
-                setStatus(result, isErr ? "err" : "ok");
+function normalizeSelected() {
+    var target = numIn(elNormTarget, -16);
+    setToolsBusy(true);
+    setStatus("Reading the selection…");
+    getSelection(function (sel) {
+        if (sel.error) { toolsDone(sel.error, true); return; }
+        var audio = sel.items.filter(function (it) { return it.kind === "audio"; });
+        if (!audio.length) { toolsDone("Select clips that have audio on the timeline.", true); return; }
+        analyzeAll(audio, { loudness: true }, function (err, results) {
+            if (err) { toolsDone(err, true); return; }
+            applyGain(audio, results, target, function (e2, msg) {
+                toolsDone(e2 ? e2 : "✔ " + msg, !!e2);
             });
         });
     });
 }
 
 elRoughCut.addEventListener("click", roughCut);
+elNormalize.addEventListener("click", normalizeSelected);
 
 elSort.addEventListener("click", function () {
     elSort.disabled = true;

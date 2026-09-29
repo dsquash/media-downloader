@@ -785,6 +785,10 @@ var elNormTarget = document.getElementById("normTarget");
 var elRcPunch = document.getElementById("rcPunch");
 var elPunch = document.getElementById("btnPunch");
 var elPunchZoom = document.getElementById("punchZoom");
+var elDynZoom = document.getElementById("btnDynZoom");
+var elDzAmount = document.getElementById("dzAmount");
+var elDzDir = document.getElementById("dzDir");
+var elDzEase = document.getElementById("dzEase");
 
 function numIn(el, def) {
     var v = parseFloat(String(el.value).replace(",", "."));
@@ -795,6 +799,7 @@ function setToolsBusy(busy) {
     elRoughCut.disabled = busy;
     elNormalize.disabled = busy;
     elPunch.disabled = busy;
+    elDynZoom.disabled = busy;
     elProgressWrap.style.display = busy ? "block" : "none";
     if (busy) elProgressBar.style.width = "0%";
 }
@@ -1090,6 +1095,25 @@ function punchSelected() {
 
 elRoughCut.addEventListener("click", roughCut);
 elPunch.addEventListener("click", punchSelected);
+
+function dynamicZoomSelected() {
+    var amount = numIn(elDzAmount, 115);
+    if (amount <= 100 || amount > 200) { setStatus("Dynamic Zoom amount must be between 101 and 200 %.", "err"); return; }
+    var opts = { amount: amount, dir: elDzDir.value, ease: elDzEase.checked };
+    setToolsBusy(true);
+    setStatus("Animating zoom…");
+    cs.evalScript("ytDynamicZoom(" + JSON.stringify(JSON.stringify(opts)) + ")", function (res) {
+        var r;
+        try { r = JSON.parse(res); } catch (e) { toolsDone("Dynamic Zoom failed: " + res, true); return; }
+        if (r.error) { toolsDone(r.error, true); return; }
+        var label = { "in": "zoom in", out: "zoom out", alt: "alternating in / out" }[opts.dir];
+        var msg = "✔ Dynamic Zoom (" + label + ", " + amount + "%) on " + r.done + " clip(s).";
+        if (r.failed) msg += " " + r.failed + " could not be animated (too short, or no Motion effect).";
+        toolsDone(msg, !r.done);
+    });
+}
+
+elDynZoom.addEventListener("click", dynamicZoomSelected);
 elNormalize.addEventListener("click", normalizeSelected);
 
 elSort.addEventListener("click", function () {

@@ -43,6 +43,13 @@ wide clip before it, so footage scaled to fit (e.g. 4K at 50 % on a 1080 timelin
 50 → 55 %, and running it twice doesn't zoom any further. Clips with keyframed Scale
 are left alone. Works on clips you cut yourself too, not only after Rough Cut.
 
+**🎥 Dynamic Zoom selected clips** animates a slow push-in or pull-out across each
+clip, like DaVinci Resolve's Dynamic Zoom: two Scale keyframes, on the first and last
+frame. Choose *Zoom in*, *Zoom out* or *Alternate* (in, out, in… in playback order —
+good on jump cuts), how far it travels (115 % by default, relative to the clip's
+current scale) and whether it eases in and out. Running it again replaces the
+previous animation rather than zooming further.
+
 Rough Cut and Normalize read the audio straight from the source files with ffmpeg — no
 transcript and no render needed. Clips must be online (file on disk).
 

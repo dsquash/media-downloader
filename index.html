@@ -173,7 +173,7 @@
     font-size: 10px;
     color: var(--text-dim);
   }
-  button#btnNormalize, button#btnPunch {
+  button#btnNormalize, button#btnPunch, button#btnDynZoom {
     flex: 1;
     background: #3a3a3a;
     border: 1px solid var(--border);
@@ -183,8 +183,18 @@
     padding: 8px;
     cursor: pointer;
   }
-  button#btnNormalize:hover, button#btnPunch:hover { background: #4a4a4a; }
-  button#btnNormalize:disabled, button#btnPunch:disabled { background: #2b2b2b; color: #666; cursor: default; }
+  button#btnNormalize:hover, button#btnPunch:hover, button#btnDynZoom:hover { background: #4a4a4a; }
+  button#btnNormalize:disabled, button#btnPunch:disabled, button#btnDynZoom:disabled { background: #2b2b2b; color: #666; cursor: default; }
+  .rc-opts select {
+    background: #1b1b1b;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 10px;
+    padding: 3px 4px;
+    margin-right: 10px;
+    outline: none;
+  }
   .norm-row input[type="text"] {
     width: 40px;
     padding: 6px 4px;
@@ -378,6 +388,19 @@
     <input type="text" id="punchZoom" value="110" title="Zoom for the punched-in clips, relative to the wide ones. 110–115 % is subtle, 120 %+ is obvious.">
     <span>%</span>
   </div>
+  <div class="norm-row">
+    <button id="btnDynZoom" title="Animates a slow zoom across each selected clip, like DaVinci's Dynamic Zoom: two Scale keyframes, first and last frame. Running it again replaces the previous animation.">🎥 Dynamic Zoom selected clips</button>
+    <input type="text" id="dzAmount" value="115" title="How far the zoom travels, relative to the clip's current scale.">
+    <span>%</span>
+  </div>
+  <div class="rc-opts">
+    <select id="dzDir" title="Alternate: in on the first clip, out on the next, and so on — good on jump cuts.">
+      <option value="in">Zoom in</option>
+      <option value="out">Zoom out</option>
+      <option value="alt">Alternate in / out</option>
+    </select>
+    <label class="rc-chk" title="Starts and stops gently instead of moving at a constant speed."><input type="checkbox" id="dzEase" checked> Ease</label>
+  </div>
 
   <div class="progress-wrap" id="progressWrap"><div class="progress-bar" id="progressBar"></div></div>
   <div id="status"></div>
@@ -415,7 +438,7 @@
 
   <!-- the ?v= query defeats CEF's stale script cache — keep it equal to version.json,
        otherwise an auto-update writes a new main.js that the panel never reads -->
-  <script src="js/CSInterface.js?v=1.4.0"></script>
-  <script src="js/main.js?v=1.4.0"></script>
+  <script src="js/CSInterface.js?v=1.5.0"></script>
+  <script src="js/main.js?v=1.5.0"></script>
 </body>
 </html>

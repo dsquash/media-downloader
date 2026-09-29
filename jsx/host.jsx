@@ -433,6 +433,94 @@ function ytPunchIn(zoom) {
     }
 }
 
+/* ---------- Dynamic Zoom (DaVinci-style slow push in / pull out) ---------- */
+
+/* The un-zoomed scale of a clip. If Scale is already animated — typically by an
+   earlier Dynamic Zoom — the smallest keyed value is the wide one, so running it
+   again replaces the old animation instead of zooming from an already-zoomed frame. */
+function ytBaseScale(p) {
+    try {
+        if (p.isTimeVarying()) {
+            var keys = p.getKeys(), lo = null;
+            for (var i = 0; keys && i < keys.length; i++) {
+                var v = p.getValueAtKey(keys[i]);
+                if (lo === null || v < lo) lo = v;
+            }
+            if (lo !== null) return lo;
+        }
+    } catch (e) {}
+    return p.getValue();
+}
+
+/* Two Scale keyframes, first and last frame of the clip. Keyframe times on a track
+   item are in source-media time, i.e. counted from the media start like inPoint —
+   not sequence time — and a speed change stretches that range. */
+function ytKeyScale(p, clip, from, to, ease, frame) {
+    var speed = 1;
+    try { speed = Math.abs(clip.getSpeed()) || 1; } catch (e) {}
+    var dur = clip.end.seconds - clip.start.seconds;
+    if (dur < frame * 2) return false;
+
+    var t0 = new Time(), t1 = new Time(), tm = new Time();
+    t0.seconds = clip.inPoint.seconds;
+    t1.seconds = clip.inPoint.seconds + (dur - frame) * speed;
+    tm.seconds = (t0.seconds + t1.seconds) / 2;
+    try {
+        p.setTimeVarying(false);   // drops any earlier keyframes
+        p.setTimeVarying(true);
+        p.addKey(t0);
+        p.setValueAtKey(t0, from, true);
+        p.addKey(t1);
+        p.setValueAtKey(t1, to, true);
+        if (ease) {
+            // 5 = Bezier: eases out of the first key and into the last
+            try { p.setInterpolationTypeAtKey(t0, 5, true); p.setInterpolationTypeAtKey(t1, 5, true); } catch (eI) {}
+        }
+        var mid = p.getValueAtTime(tm);
+        return mid > Math.min(from, to) + 0.001 && mid < Math.max(from, to) - 0.001;
+    } catch (err) {
+        return false;
+    }
+}
+
+function ytDynamicZoom(json) {
+    if (ytIsAE()) return ytStr({ error: "Dynamic Zoom is only available in Premiere Pro." });
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return ytStr({ error: "No active sequence." });
+        var d = eval("(" + json + ")");
+        var frame = 1 / 25;
+        try { frame = seq.getSettings().videoFrameRate.seconds || frame; } catch (eF) {}
+
+        var clips = [];
+        for (var t = 0; t < seq.videoTracks.numTracks; t++) {
+            var cl = seq.videoTracks[t].clips;
+            for (var j = 0; j < cl.numItems; j++) if (ytSelected(cl[j])) clips.push(cl[j]);
+        }
+        if (!clips.length) return ytStr({ error: "Select the video clips to animate." });
+        // "alternate" follows the order they play in, whatever track they're on
+        clips.sort(function (a, b) { return a.start.seconds - b.start.seconds; });
+
+        var done = 0, failed = 0;
+        for (var n = 0; n < clips.length; n++) {
+            var p = ytMotionScale(clips[n]);
+            if (!p) { failed++; continue; }
+            var base = ytBaseScale(p), zoomed = base * d.amount / 100;
+            var zoomIn = d.dir === "in" || (d.dir === "alt" && n % 2 === 0);
+            if (ytKeyScale(p, clips[n], zoomIn ? base : zoomed, zoomIn ? zoomed : base, d.ease, frame)) {
+                done++;
+            } else {
+                // leave nothing half-made behind
+                try { p.setTimeVarying(false); p.setValue(base, true); } catch (eR) {}
+                failed++;
+            }
+        }
+        return ytStr({ done: done, failed: failed, seen: clips.length });
+    } catch (err) {
+        return ytStr({ error: "Dynamic Zoom failed: " + err });
+    }
+}
+
 /* Slide everything after each removed section left, on the target tracks only.
    Done by hand rather than with ripple-delete because the API's ripple behaviour
    across linked, multi-track selections isn't documented; this way every track

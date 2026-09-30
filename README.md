@@ -50,6 +50,15 @@ good on jump cuts), how far it travels (115 % by default, relative to the clip's
 current scale) and whether it eases in and out. Running it again replaces the
 previous animation rather than zooming further.
 
+**💥 SFX at cuts between selected clips** puts a sound on every cut — every point where
+one selected clip ends and the next begins, such as the joins Rough Cut leaves. Pick
+the sound once with **Choose sound…** (any wav / mp3 / aif on your computer; it's
+remembered on that machine) and whether it's centred on the cut, starts at it or ends
+at it. Each sound lands on the first audio track that is free at that moment, so it
+never covers dialogue or music, and nothing on the timeline moves. If no track is
+free, add an empty audio track and run it again. The sound is imported once into an
+**SFX** bin.
+
 Rough Cut and Normalize read the audio straight from the source files with ffmpeg — no
 transcript and no render needed. Clips must be online (file on disk).
 

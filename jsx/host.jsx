@@ -521,6 +521,82 @@ function ytDynamicZoom(json) {
     }
 }
 
+/* ---------- SFX at cuts ---------- */
+
+/* d: { file, dur (seconds, measured by the panel), align: "center" | "start" | "end" }
+   A cut is any point where one selected clip ends and the next one starts. */
+function ytSfxAtCuts(json) {
+    if (ytIsAE()) return ytStr({ error: "SFX at cuts is only available in Premiere Pro." });
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return ytStr({ error: "No active sequence." });
+        var d = eval("(" + json + ")");
+        var frame = 1 / 25;
+        try { frame = seq.getSettings().videoFrameRate.seconds || frame; } catch (eF) {}
+        var tol = frame * 0.5 + 0.0005, i, j;
+
+        // video clips define the cuts; audio only if no video is selected at all
+        function selectedOn(tracks) {
+            var out = [];
+            for (var t = 0; t < tracks.numTracks; t++) {
+                var cl = tracks[t].clips;
+                for (var k = 0; k < cl.numItems; k++) {
+                    if (ytSelected(cl[k])) out.push({ s: cl[k].start.seconds, e: cl[k].end.seconds });
+                }
+            }
+            return out;
+        }
+        var clips = selectedOn(seq.videoTracks);
+        if (!clips.length) clips = selectedOn(seq.audioTracks);
+        clips.sort(function (a, b) { return a.s - b.s; });
+
+        var points = [];
+        for (i = 1; i < clips.length; i++) {
+            var t = clips[i].s;
+            if (Math.abs(clips[i - 1].e - t) > tol) continue;   // a gap, not a cut
+            if (points.length && Math.abs(points[points.length - 1] - t) < tol) continue;
+            points.push(t);
+        }
+        if (!points.length) return ytStr({ error: "Select two or more clips that meet at a cut." });
+
+        // import once, into an SFX bin; reuse it if it's already in the project
+        var bin = ytFindOrCreateBinPPro("SFX");
+        var item = ytFindInBinByPath(bin, d.file);
+        if (!item) {
+            app.project.importFiles([d.file], true, bin, false);
+            item = ytFindInBinByPath(bin, d.file);
+        }
+        if (!item) return ytStr({ error: "Could not import the sound into the project." });
+
+        var lead = d.align === "start" ? 0 : d.align === "end" ? d.dur : d.dur / 2;
+        var at = seq.audioTracks, placed = 0, noRoom = 0;
+
+        for (i = 0; i < points.length; i++) {
+            var st = Math.max(0, points[i] - lead), en = st + d.dur, track = null;
+            // first unlocked audio track with nothing in [st, en): the sound must not
+            // cover dialogue, and overwrite would otherwise eat whatever is there
+            for (j = 0; j < at.numTracks && !track; j++) {
+                var locked = false;
+                try { locked = at[j].isLocked(); } catch (eL) {}
+                if (locked) continue;
+                var free = true, cl2 = at[j].clips;
+                for (var k2 = 0; k2 < cl2.numItems && free; k2++) {
+                    if (cl2[k2].start.seconds < en - tol && cl2[k2].end.seconds > st + tol) free = false;
+                }
+                if (free) track = at[j];
+            }
+            if (!track) { noRoom++; continue; }
+            var tm = new Time();
+            tm.seconds = st;
+            // overwrite, not insert: insertClip would push everything after it along
+            try { track.overwriteClip(item, tm.ticks); placed++; } catch (eO) { noRoom++; }
+        }
+        return ytStr({ placed: placed, noRoom: noRoom, points: points.length });
+    } catch (err) {
+        return ytStr({ error: "SFX at cuts failed: " + err });
+    }
+}
+
 /* Slide everything after each removed section left, on the target tracks only.
    Done by hand rather than with ripple-delete because the API's ripple behaviour
    across linked, multi-track selections isn't documented; this way every track

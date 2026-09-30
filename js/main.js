@@ -789,6 +789,10 @@ var elDynZoom = document.getElementById("btnDynZoom");
 var elDzAmount = document.getElementById("dzAmount");
 var elDzDir = document.getElementById("dzDir");
 var elDzEase = document.getElementById("dzEase");
+var elSfx = document.getElementById("btnSfx");
+var elSfxPick = document.getElementById("btnSfxPick");
+var elSfxName = document.getElementById("sfxName");
+var elSfxAlign = document.getElementById("sfxAlign");
 
 function numIn(el, def) {
     var v = parseFloat(String(el.value).replace(",", "."));
@@ -800,6 +804,7 @@ function setToolsBusy(busy) {
     elNormalize.disabled = busy;
     elPunch.disabled = busy;
     elDynZoom.disabled = busy;
+    elSfx.disabled = busy;
     elProgressWrap.style.display = busy ? "block" : "none";
     if (busy) elProgressBar.style.width = "0%";
 }
@@ -1114,6 +1119,59 @@ function dynamicZoomSelected() {
 }
 
 elDynZoom.addEventListener("click", dynamicZoomSelected);
+
+/* ---------- SFX at cuts ----------
+   The sound comes from the editor's own disk and is remembered per machine, so it
+   can be swapped any time without an update — and nobody's licensed SFX has to
+   live in this public repo. */
+
+var SFX_KEY = "md.sfxFile";
+
+function sfxFile() {
+    try { return localStorage.getItem(SFX_KEY) || ""; } catch (e) { return ""; }
+}
+
+function showSfx() {
+    var f = sfxFile();
+    elSfxName.textContent = f ? path.basename(f) : "no sound chosen";
+    elSfxName.title = f;
+}
+
+function pickSfx(then) {
+    var r = null;
+    try {
+        r = window.cep.fs.showOpenDialogEx(false, false, "Choose a sound effect", "",
+                                          ["wav", "mp3", "aif", "aiff", "m4a", "aac"]);
+    } catch (e) {}
+    var f = r && r.data && r.data[0];
+    if (!f) return;
+    try { localStorage.setItem(SFX_KEY, f); } catch (e2) {}
+    showSfx();
+    if (then) then(f);
+}
+
+function sfxAtCuts(file) {
+    if (!file || !fs.existsSync(file)) { pickSfx(sfxAtCuts); return; }
+    setToolsBusy(true);
+    setStatus("Reading " + path.basename(file) + "…");
+    detectVideoStream(file, function (codec, line, dur) {
+        if (!dur) { toolsDone("Could not read the length of " + path.basename(file) + ".", true); return; }
+        var opts = { file: file, dur: dur, align: elSfxAlign.value };
+        setStatus("Placing sounds…");
+        cs.evalScript("ytSfxAtCuts(" + JSON.stringify(JSON.stringify(opts)) + ")", function (res) {
+            var r;
+            try { r = JSON.parse(res); } catch (e) { toolsDone("SFX at cuts failed: " + res, true); return; }
+            if (r.error) { toolsDone(r.error, true); return; }
+            var msg = "✔ " + path.basename(file) + " placed on " + r.placed + " of " + r.points + " cut(s).";
+            if (r.noRoom) msg += " " + r.noRoom + " had no free audio track — add an empty one and run it again.";
+            toolsDone(msg, !r.placed);
+        });
+    });
+}
+
+elSfxPick.addEventListener("click", function () { pickSfx(); });
+elSfx.addEventListener("click", function () { sfxAtCuts(sfxFile()); });
+showSfx();
 elNormalize.addEventListener("click", normalizeSelected);
 
 elSort.addEventListener("click", function () {

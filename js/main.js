@@ -785,6 +785,7 @@ var elNormTarget = document.getElementById("normTarget");
 var elRcPunch = document.getElementById("rcPunch");
 var elPunch = document.getElementById("btnPunch");
 var elPunchZoom = document.getElementById("punchZoom");
+var elPunchSfx = document.getElementById("punchSfx");
 var elDynZoom = document.getElementById("btnDynZoom");
 var elDzAmount = document.getElementById("dzAmount");
 var elDzDir = document.getElementById("dzDir");
@@ -998,6 +999,11 @@ function uniqTracks(items, kind) {
 }
 
 function roughCut() {
+    var needSfx = elRcPunch.checked && elPunchSfx.checked;
+    withSfx(needSfx, roughCutWith);
+}
+
+function roughCutWith(sfx) {
     var noiseRaw = String(elRcThreshold.value || "-30").trim();
     var noise = /^-?\d+(\.\d+)?$/.test(noiseRaw) ? noiseRaw + "dB" : noiseRaw;
     var minDur = Math.max(0.1, numIn(elRcMinDur, 0.5));
@@ -1027,7 +1033,7 @@ function roughCut() {
                     return;
                 }
                 setStatus(prefix + "Cutting " + cuts.length + " silent section(s)…");
-                var payload = { cuts: cuts, frame: sel.frame, close: close, punch: punch,
+                var payload = { cuts: cuts, frame: sel.frame, close: close, punch: punch, sfx: sfx,
                                 video: uniqTracks(sel.items, "video"), audio: uniqTracks(sel.items, "audio"),
                                 ranges: sel.items.filter(function (it) { return it.kind === "video"; })
                                                  .map(function (it) { return { track: it.track, s: it.seqStart, e: it.seqEnd }; }) };
@@ -1039,6 +1045,7 @@ function roughCut() {
                     msg += close && r.closed ? " — " + fmtDur(r.saved) + " shorter." : ", gaps left in place.";
                     if (close && !r.closed) msg += " Some gaps could not be closed: Sequence → Close Gap.";
                     if (punch) msg += " Punch-in on " + (r.punched || 0) + " piece(s).";
+                    if (sfx) msg += sfxNote(r.sfxPlaced, r.sfxNoRoom);
                     if (r.skipped) msg += " " + r.skipped + " skipped (unselected clips on the same tracks).";
                     if (r.missed) msg += " " + r.missed + " could not be cut cleanly and were left alone.";
                     if (r.backup) msg += " Original kept as “" + r.backup + "”.";
@@ -1084,16 +1091,21 @@ function punchZoom() {
 }
 
 function punchSelected() {
+    withSfx(elPunchSfx.checked, punchSelectedWith);
+}
+
+function punchSelectedWith(sfx) {
     var zoom = punchZoom();
     if (zoom === null) return;
     setToolsBusy(true);
     setStatus("Punching in…");
-    cs.evalScript("ytPunchIn(" + zoom + ")", function (res) {
+    cs.evalScript("ytPunchIn(" + JSON.stringify(JSON.stringify({ zoom: zoom, sfx: sfx })) + ")", function (res) {
         var r;
         try { r = JSON.parse(res); } catch (e) { toolsDone("Punch-in failed: " + res, true); return; }
         if (r.error) { toolsDone(r.error, true); return; }
         var msg = "✔ Punch-in " + zoom + "% on " + r.done + " of " + r.seen + " clip(s) — every second one.";
         if (r.done < Math.floor(r.seen / 2)) msg += " Clips with keyframed Scale were left alone.";
+        if (sfx) msg += sfxNote(r.sfxPlaced, r.sfxNoRoom);
         toolsDone(msg, false);
     });
 }
@@ -1167,6 +1179,28 @@ function sfxAtCuts(file) {
             toolsDone(msg, !r.placed);
         });
     });
+}
+
+/* Resolve the chosen sound into { file, dur, align } — asking for one if none is set
+   yet — or hand back null when no sound is wanted. Nothing runs if the dialog is
+   cancelled. */
+function withSfx(needed, run) {
+    if (!needed) { run(null); return; }
+    var go = function (file) {
+        setStatus("Reading " + path.basename(file) + "…");
+        detectVideoStream(file, function (codec, line, dur) {
+            if (!dur) { setStatus("Could not read the length of " + path.basename(file) + ".", "err"); return; }
+            run({ file: file, dur: dur, align: elSfxAlign.value });
+        });
+    };
+    var f = sfxFile();
+    if (f && fs.existsSync(f)) go(f); else pickSfx(go);
+}
+
+function sfxNote(placed, noRoom) {
+    var n = " Sound on " + (placed || 0) + " punch-in(s).";
+    if (noRoom) n += " " + noRoom + " had no free audio track — add an empty one.";
+    return n;
 }
 
 elSfxPick.addEventListener("click", function () { pickSfx(); });

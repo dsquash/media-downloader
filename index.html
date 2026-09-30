@@ -404,6 +404,7 @@
     <button id="btnPunch" title="Zooms in on every second selected clip, so jump cuts alternate wide / close. Works on clips you cut yourself too. Clips with keyframed Scale are left alone.">🔍 Punch-in selected clips</button>
     <input type="text" id="punchZoom" value="110" title="Zoom for the punched-in clips, relative to the wide ones. 110–115 % is subtle, 120 %+ is obvious.">
     <span>%</span>
+    <label class="rc-chk" style="margin-right:0" title="Plays the sound chosen under SFX on every punch-in — only where the picture zooms in — aligned the way it's set there. Also applies to Rough Cut's Punch-in."><input type="checkbox" id="punchSfx"> + SFX</label>
   </div>
   <div class="norm-row">
     <button id="btnDynZoom" title="Animates a slow zoom across each selected clip, like DaVinci's Dynamic Zoom: two Scale keyframes, first and last frame. Running it again replaces the previous animation.">🎥 Dynamic Zoom selected clips</button>
@@ -467,7 +468,7 @@
 
   <!-- the ?v= query defeats CEF's stale script cache — keep it equal to version.json,
        otherwise an auto-update writes a new main.js that the panel never reads -->
-  <script src="js/CSInterface.js?v=1.6.0"></script>
-  <script src="js/main.js?v=1.6.0"></script>
+  <script src="js/CSInterface.js?v=1.7.0"></script>
+  <script src="js/main.js?v=1.7.0"></script>
 </body>
 </html>

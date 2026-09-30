@@ -42,6 +42,9 @@ cuts alternate wide / close instead of looking like skips. The zoom is relative 
 wide clip before it, so footage scaled to fit (e.g. 4K at 50 % on a 1080 timeline) goes
 50 → 55 %, and running it twice doesn't zoom any further. Clips with keyframed Scale
 are left alone. Works on clips you cut yourself too, not only after Rough Cut.
+Tick **+ SFX** to play the sound chosen under *SFX at cuts* on every punch-in — only
+where the picture zooms in, not where it zooms back out — aligned the way it's set
+there (centred on the cut by default). It applies to Rough Cut's Punch-in option too.
 
 **🎥 Dynamic Zoom selected clips** animates a slow push-in or pull-out across each
 clip, like DaVinci Resolve's Dynamic Zoom: two Scale keyframes, on the first and last

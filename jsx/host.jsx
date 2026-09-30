@@ -347,7 +347,7 @@ function ytApplyRoughCut(dataJson) {
 
         // Punch-in has to happen before the gaps close: the pieces are found by the
         // positions the selected clips had, and the TrackItem refs stay valid after moving.
-        var punched = 0;
+        var punched = 0, pairs = [];
         if (d.punch && d.ranges && applied.length) {
             for (i = 0; i < d.video.length; i++) {
                 var vt = seq.videoTracks[d.video[i]], pieces = [];
@@ -361,7 +361,7 @@ function ytApplyRoughCut(dataJson) {
                         }
                     }
                 }
-                punched += ytPunchPieces(pieces, d.punch);
+                punched += ytPunchPieces(pieces, d.punch, pairs);
             }
         }
 
@@ -369,8 +369,14 @@ function ytApplyRoughCut(dataJson) {
         for (k = 0; k < applied.length; k++) saved += applied[k].e - applied[k].s;
         var closed = d.close && applied.length ? ytCloseGaps(tracks, applied, tol) : false;
 
+        // read the punch-in points only now: the pieces have moved, their refs followed
+        var sfx = { placed: 0, noRoom: 0, points: 0 };
+        if (d.sfx && pairs.length) sfx = ytPlaceSfx(seq, d.sfx, ytZoomInPoints(pairs, tol), tol);
+        if (sfx.error) return ytStr({ error: sfx.error });
+
         return ytStr({ applied: applied.length, removed: removed, skipped: skipped, missed: missed,
-                       saved: saved, closed: closed, backup: backup, punched: punched });
+                       saved: saved, closed: closed, backup: backup, punched: punched,
+                       sfxPlaced: sfx.placed, sfxNoRoom: sfx.noRoom });
     } catch (err) {
         return ytStr({ error: "Rough cut failed: " + err });
     }
@@ -398,8 +404,10 @@ function ytMotionScale(clip) {
    alternates wide / close. Measuring from the preceding (un-zoomed) piece rather
    than the clip's own value keeps it right for footage that isn't at 100% to begin
    with, and makes a second run a no-op instead of zooming further. Keyframed
-   Scale is left alone — overwriting it would destroy an animation. */
-function ytPunchPieces(pieces, zoom) {
+   Scale is left alone — overwriting it would destroy an animation.
+   If `pairs` is given, each (previous piece, zoomed piece) is added to it — the
+   join between them is where the picture punches in. */
+function ytPunchPieces(pieces, zoom, pairs) {
     pieces.sort(function (a, b) { return a.start.seconds - b.start.seconds; });
     var base = null, done = 0;
     for (var i = 0; i < pieces.length; i++) {
@@ -408,26 +416,48 @@ function ytPunchPieces(pieces, zoom) {
         try { if (p.isTimeVarying()) continue; } catch (e) {}
         if (i % 2 === 0) { base = p.getValue(); continue; }
         if (base === null) continue;
-        try { p.setValue(base * zoom / 100, true); done++; } catch (e2) {}
+        try {
+            p.setValue(base * zoom / 100, true);
+            done++;
+            if (pairs) pairs.push({ a: pieces[i - 1], b: pieces[i] });
+        } catch (e2) {}
     }
     return done;
 }
 
-function ytPunchIn(zoom) {
+/* Joins where the picture punches in — only where the two pieces actually touch */
+function ytZoomInPoints(pairs, tol) {
+    var pts = [];
+    for (var i = 0; i < pairs.length; i++) {
+        var t = pairs[i].b.start.seconds;
+        if (Math.abs(pairs[i].a.end.seconds - t) < tol) pts.push(t);
+    }
+    pts.sort(function (x, y) { return x - y; });
+    return pts;
+}
+
+/* d: { zoom, sfx: null | { file, dur, align } } */
+function ytPunchIn(json) {
     if (ytIsAE()) return ytStr({ error: "Punch-in is only available in Premiere Pro." });
     try {
         var seq = app.project.activeSequence;
         if (!seq) return ytStr({ error: "No active sequence." });
-        var done = 0, seen = 0;
+        var d = eval("(" + json + ")"), zoom = d.zoom;
+        var frame = 1 / 25;
+        try { frame = seq.getSettings().videoFrameRate.seconds || frame; } catch (eF) {}
+        var done = 0, seen = 0, pairs = [];
         for (var t = 0; t < seq.videoTracks.numTracks; t++) {
             var cl = seq.videoTracks[t].clips, pieces = [];
             for (var j = 0; j < cl.numItems; j++) if (ytSelected(cl[j])) pieces.push(cl[j]);
             seen += pieces.length;
-            if (pieces.length > 1) done += ytPunchPieces(pieces, zoom);
+            if (pieces.length > 1) done += ytPunchPieces(pieces, zoom, pairs);
         }
         if (!seen) return ytStr({ error: "Select the video clips to punch in on." });
         if (seen === 1) return ytStr({ error: "Select at least two clips — punch-in alternates between them." });
-        return ytStr({ done: done, seen: seen });
+        var sfx = { placed: 0, noRoom: 0, points: 0 };
+        if (d.sfx && pairs.length) sfx = ytPlaceSfx(seq, d.sfx, ytZoomInPoints(pairs, frame * 0.5 + 0.0005), frame * 0.5 + 0.0005);
+        if (sfx.error) return ytStr({ error: sfx.error });
+        return ytStr({ done: done, seen: seen, sfxPlaced: sfx.placed, sfxNoRoom: sfx.noRoom, sfxPoints: sfx.points });
     } catch (err) {
         return ytStr({ error: "Punch-in failed: " + err });
     }
@@ -558,7 +588,16 @@ function ytSfxAtCuts(json) {
             points.push(t);
         }
         if (!points.length) return ytStr({ error: "Select two or more clips that meet at a cut." });
+        return ytStr(ytPlaceSfx(seq, d, points, tol));
+    } catch (err) {
+        return ytStr({ error: "SFX at cuts failed: " + err });
+    }
+}
 
+/* Put the sound d.file (d.dur seconds long) at each point, aligned per d.align. */
+function ytPlaceSfx(seq, d, points, tol) {
+    var i, j;
+    try {
         // import once, into an SFX bin; reuse it if it's already in the project
         var bin = ytFindOrCreateBinPPro("SFX");
         var item = ytFindInBinByPath(bin, d.file);
@@ -566,7 +605,7 @@ function ytSfxAtCuts(json) {
             app.project.importFiles([d.file], true, bin, false);
             item = ytFindInBinByPath(bin, d.file);
         }
-        if (!item) return ytStr({ error: "Could not import the sound into the project." });
+        if (!item) return { error: "Could not import the sound into the project." };
 
         var lead = d.align === "start" ? 0 : d.align === "end" ? d.dur : d.dur / 2;
         var at = seq.audioTracks, placed = 0, noRoom = 0;
@@ -591,9 +630,9 @@ function ytSfxAtCuts(json) {
             // overwrite, not insert: insertClip would push everything after it along
             try { track.overwriteClip(item, tm.ticks); placed++; } catch (eO) { noRoom++; }
         }
-        return ytStr({ placed: placed, noRoom: noRoom, points: points.length });
+        return { placed: placed, noRoom: noRoom, points: points.length };
     } catch (err) {
-        return ytStr({ error: "SFX at cuts failed: " + err });
+        return { error: "Placing the sound failed: " + err };
     }
 }
 

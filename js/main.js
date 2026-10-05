@@ -1332,3 +1332,38 @@ refreshProjectInfo();
 setInterval(refreshProjectInfo, 15000);
 checkForUpdate();
 checkTools();
+
+/* ---------- tabs + collapsible tool cards ----------
+   Which tab and which tools were open are remembered per machine, so the panel
+   reopens the way it was left. */
+
+(function () {
+    var tabs = document.querySelectorAll(".tab"), panes = document.querySelectorAll(".pane");
+    function show(name) {
+        Array.prototype.forEach.call(tabs, function (t) {
+            t.classList.toggle("active", t.getAttribute("data-tab") === name);
+        });
+        Array.prototype.forEach.call(panes, function (p) {
+            p.classList.toggle("active", p.id === "pane-" + name);
+        });
+        try { localStorage.setItem("md.tab", name); } catch (e) {}
+    }
+    Array.prototype.forEach.call(tabs, function (t) {
+        t.addEventListener("click", function () { show(t.getAttribute("data-tab")); });
+    });
+    var saved = "download";
+    try { saved = localStorage.getItem("md.tab") || saved; } catch (e) {}
+    if (!document.getElementById("pane-" + saved)) saved = "download";
+    show(saved);
+
+    Array.prototype.forEach.call(document.querySelectorAll("details.tool"), function (d) {
+        var key = "md.open." + d.id;
+        try {
+            var v = localStorage.getItem(key);
+            if (v !== null) d.open = v === "1";
+        } catch (e2) {}
+        d.addEventListener("toggle", function () {
+            try { localStorage.setItem(key, d.open ? "1" : "0"); } catch (e3) {}
+        });
+    });
+})();

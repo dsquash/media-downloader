@@ -3,3 +3,6 @@ __MACOSX/
 bin/
 cookies.txt
 *.new
+node_modules/
+package.json
+package-lock.json

@@ -371,7 +371,11 @@ function ytApplyRoughCut(dataJson) {
 
         // read the punch-in points only now: the pieces have moved, their refs followed
         var sfx = { placed: 0, noRoom: 0, points: 0 };
-        if (d.sfx && pairs.length) sfx = ytPlaceSfx(seq, d.sfx, ytZoomInPoints(pairs, tol), tol);
+        if (d.sfx && pairs.length) {
+            var first = d.ranges[0].s;
+            for (var q = 1; q < d.ranges.length; q++) if (d.ranges[q].s < first) first = d.ranges[q].s;
+            sfx = ytPlaceSfx(seq, d.sfx, ytWithStart(ytZoomInPoints(pairs, tol), first, tol), tol);
+        }
         if (sfx.error) return ytStr({ error: sfx.error });
 
         return ytStr({ applied: applied.length, removed: removed, skipped: skipped, missed: missed,
@@ -425,6 +429,14 @@ function ytPunchPieces(pieces, zoom, pairs) {
     return done;
 }
 
+/* The sound also marks the start of the edit: a run of cuts opens on it, then hits
+   every join. `start` is the earliest selected clip; skipped if a point is already there. */
+function ytWithStart(points, start, tol) {
+    for (var i = 0; i < points.length; i++) if (Math.abs(points[i] - start) < tol) return points;
+    points.unshift(start);
+    return points;
+}
+
 /* Joins where the picture punches in — only where the two pieces actually touch */
 function ytZoomInPoints(pairs, tol) {
     var pts = [];
@@ -445,17 +457,24 @@ function ytPunchIn(json) {
         var d = eval("(" + json + ")"), zoom = d.zoom;
         var frame = 1 / 25;
         try { frame = seq.getSettings().videoFrameRate.seconds || frame; } catch (eF) {}
-        var done = 0, seen = 0, pairs = [];
+        var done = 0, seen = 0, pairs = [], first = null;
         for (var t = 0; t < seq.videoTracks.numTracks; t++) {
             var cl = seq.videoTracks[t].clips, pieces = [];
-            for (var j = 0; j < cl.numItems; j++) if (ytSelected(cl[j])) pieces.push(cl[j]);
+            for (var j = 0; j < cl.numItems; j++) {
+                if (!ytSelected(cl[j])) continue;
+                pieces.push(cl[j]);
+                if (first === null || cl[j].start.seconds < first) first = cl[j].start.seconds;
+            }
             seen += pieces.length;
             if (pieces.length > 1) done += ytPunchPieces(pieces, zoom, pairs);
         }
         if (!seen) return ytStr({ error: "Select the video clips to punch in on." });
         if (seen === 1) return ytStr({ error: "Select at least two clips — punch-in alternates between them." });
         var sfx = { placed: 0, noRoom: 0, points: 0 };
-        if (d.sfx && pairs.length) sfx = ytPlaceSfx(seq, d.sfx, ytZoomInPoints(pairs, frame * 0.5 + 0.0005), frame * 0.5 + 0.0005);
+        if (d.sfx && pairs.length) {
+            var tolP = frame * 0.5 + 0.0005;
+            sfx = ytPlaceSfx(seq, d.sfx, ytWithStart(ytZoomInPoints(pairs, tolP), first, tolP), tolP);
+        }
         if (sfx.error) return ytStr({ error: sfx.error });
         return ytStr({ done: done, seen: seen, sfxPlaced: sfx.placed, sfxNoRoom: sfx.noRoom, sfxPoints: sfx.points });
     } catch (err) {
@@ -588,7 +607,7 @@ function ytSfxAtCuts(json) {
             points.push(t);
         }
         if (!points.length) return ytStr({ error: "Select two or more clips that meet at a cut." });
-        return ytStr(ytPlaceSfx(seq, d, points, tol));
+        return ytStr(ytPlaceSfx(seq, d, ytWithStart(points, clips[0].s, tol), tol));
     } catch (err) {
         return ytStr({ error: "SFX at cuts failed: " + err });
     }

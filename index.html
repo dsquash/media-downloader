@@ -62,7 +62,7 @@
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 12px; margin-bottom: 10px;
   }
-  .card h2 { font-size: 12px; font-weight: 600; color: #ececec; margin-bottom: 3px; }
+  .card h2 { font-size: 12px; font-weight: 600; color: #ececec; margin-bottom: 9px; }
   .card p.help { font-size: 10.5px; color: var(--text-dim); line-height: 1.5; margin-bottom: 10px; }
 
   .lbl {
@@ -164,6 +164,7 @@
   /* ── project pane ── */
   .card .btn { margin-top: 2px; }
   #projectInfo {
+    margin-top: -3px;
     font-size: 10.5px; color: var(--text-dim); line-height: 1.5;
     word-break: break-all; white-space: pre-line;
   }
@@ -213,7 +214,6 @@
 
     <!-- ════════ Download ════════ -->
     <section class="pane" id="pane-download">
-      <p class="intro">Paste a link from YouTube, TikTok, Instagram or almost any other site. It lands in the project's <b>assets</b> folder and is imported for you.</p>
 
       <label class="lbl" for="url">Video link</label>
       <div class="url-row">
@@ -246,12 +246,10 @@
 
     <!-- ════════ Edit ════════ -->
     <section class="pane" id="pane-edit">
-      <p class="intro">Select clips on the timeline, open a tool, and run it. Everything works on the selection only.</p>
 
       <details class="tool" id="tool-rc" open>
         <summary><span class="t-icon">✂</span><span class="t-name">Rough Cut</span><span class="t-desc">remove silences</span><span class="chev"></span></summary>
         <div class="t-body">
-          <p class="help">Cuts the pauses out of the selected clips. With stacked clips (two mics, multicam) a moment goes only when it's silent in all of them. The original sequence is kept as a copy.</p>
           <div class="fields">
             <label class="f" title="Anything quieter than this counts as silence. Raise it (e.g. -25) for noisy rooms."><span>Threshold</span><div class="in"><input type="text" id="rcThreshold" value="-30"><em>dB</em></div></label>
             <label class="f" title="Pauses shorter than this are kept."><span>Min silence</span><div class="in"><input type="text" id="rcMinDur" value="0.5"><em>s</em></div></label>
@@ -269,7 +267,6 @@
       <details class="tool" id="tool-norm">
         <summary><span class="t-icon">🔊</span><span class="t-name">Normalize</span><span class="t-desc">even out loudness</span><span class="chev"></span></summary>
         <div class="t-body">
-          <p class="help">Measures each selected clip (EBU R128) and sets its Volume so it lands on the target, keeping peaks under −1 dB. Nothing is rendered — it's just the clip's volume.</p>
           <div class="fields">
             <label class="f" title="-16 LUFS suits most online video; -14 is louder (YouTube, social)."><span>Target</span><div class="in"><input type="text" id="normTarget" value="-16"><em>LUFS</em></div></label>
           </div>
@@ -280,7 +277,6 @@
       <details class="tool" id="tool-punch">
         <summary><span class="t-icon">🔍</span><span class="t-name">Punch-in</span><span class="t-desc">alternate wide / close</span><span class="chev"></span></summary>
         <div class="t-body">
-          <p class="help">Zooms in on every second selected clip, so jump cuts alternate wide and close instead of looking like skips. Run it again and nothing changes — it never zooms further.</p>
           <div class="fields">
             <label class="f" title="Relative to the wide clips. 110–115 % is subtle, 120 %+ is obvious."><span>Zoom</span><div class="in"><input type="text" id="punchZoom" value="110"><em>%</em></div></label>
           </div>
@@ -294,7 +290,6 @@
       <details class="tool" id="tool-dz">
         <summary><span class="t-icon">🎥</span><span class="t-name">Dynamic Zoom</span><span class="t-desc">slow animated push-in</span><span class="chev"></span></summary>
         <div class="t-body">
-          <p class="help">A slow zoom across each selected clip, like DaVinci's Dynamic Zoom — two Scale keyframes, first and last frame. Running it again replaces the previous animation.</p>
           <div class="fields">
             <label class="f" title="How far the zoom travels, relative to the clip's current scale."><span>Amount</span><div class="in"><input type="text" id="dzAmount" value="115"><em>%</em></div></label>
             <label class="f" title="Alternate: in on the first clip, out on the next, and so on — good on jump cuts."><span>Direction</span>
@@ -315,7 +310,6 @@
       <details class="tool" id="tool-sfx">
         <summary><span class="t-icon">💥</span><span class="t-name">SFX at cuts</span><span class="t-desc">a sound on every join</span><span class="chev"></span></summary>
         <div class="t-body">
-          <p class="help">Puts your sound on every cut between the selected clips — the joins Rough Cut leaves, or your own. Each lands on the first free audio track; nothing on the timeline moves.</p>
           <div class="sound">
             <button id="btnSfxPick" class="mini" title="Any wav / mp3 / aif on your computer. Remembered on this machine.">Choose sound…</button>
             <span id="sfxName" class="name">no sound chosen</span>
@@ -337,15 +331,11 @@
     <!-- ════════ Project ════════ -->
     <section class="pane" id="pane-project">
       <div class="card">
-        <h2>🗂 Sort into bins</h2>
-        <p class="help">Loose items in the project root and the assets bin go into Videos, Audio, Images and Sequences. Your own bins are left alone.</p>
-        <button id="btnSort" class="btn quiet">Sort project into bins</button>
+        <button id="btnSort" class="btn quiet">🗂 Sort project into bins</button>
       </div>
 
       <div class="card">
-        <h2>📸 Paste screenshot</h2>
-        <p class="help">Saves the image on your clipboard into the assets folder and imports it. Take a screenshot to clipboard first: Cmd+Ctrl+Shift+4 (Mac) / Win+Shift+S (Windows).</p>
-        <button id="btnPasteImg" class="btn quiet">Paste screenshot from clipboard</button>
+        <button id="btnPasteImg" class="btn quiet">📸 Paste screenshot from clipboard</button>
       </div>
 
       <div class="card">
@@ -387,7 +377,7 @@
 
 <!-- the ?v= query defeats CEF's stale script cache — keep it equal to version.json,
      otherwise an auto-update writes a new main.js that the panel never reads -->
-<script src="js/CSInterface.js?v=1.8.0"></script>
-<script src="js/main.js?v=1.8.0"></script>
+<script src="js/CSInterface.js?v=1.8.1"></script>
+<script src="js/main.js?v=1.8.1"></script>
 </body>
 </html>

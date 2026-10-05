@@ -42,9 +42,9 @@ cuts alternate wide / close instead of looking like skips. The zoom is relative 
 wide clip before it, so footage scaled to fit (e.g. 4K at 50 % on a 1080 timeline) goes
 50 → 55 %, and running it twice doesn't zoom any further. Clips with keyframed Scale
 are left alone. Works on clips you cut yourself too, not only after Rough Cut.
-Tick **+ SFX** to play the sound chosen under *SFX at cuts* on every punch-in — only
-where the picture zooms in, not where it zooms back out — aligned the way it's set
-there (centred on the cut by default). It applies to Rough Cut's Punch-in option too.
+Tick **+ SFX** to play the sound chosen under *SFX at cuts* at the start of the first
+clip and on every punch-in — only where the picture zooms in, not where it zooms back
+out — aligned the way it's set there (centred on the cut by default). It applies to Rough Cut's Punch-in option too.
 
 **🎥 Dynamic Zoom selected clips** animates a slow push-in or pull-out across each
 clip, like DaVinci Resolve's Dynamic Zoom: two Scale keyframes, on the first and last
@@ -53,8 +53,9 @@ good on jump cuts), how far it travels (115 % by default, relative to the clip's
 current scale) and whether it eases in and out. Running it again replaces the
 previous animation rather than zooming further.
 
-**💥 SFX at cuts between selected clips** puts a sound on every cut — every point where
-one selected clip ends and the next begins, such as the joins Rough Cut leaves. Pick
+**💥 SFX at cuts between selected clips** puts a sound at the start of the first selected
+clip and on every cut after it — every point where one selected clip ends and the next
+begins, such as the joins Rough Cut leaves. The edit opens on the sound, then hits every join. Pick
 the sound once with **Choose sound…** (any wav / mp3 / aif on your computer; it's
 remembered on that machine) and whether it's centred on the cut, starts at it or ends
 at it. Each sound lands on the first audio track that is free at that moment, so it

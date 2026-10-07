@@ -679,18 +679,45 @@ function ytCloseGaps(tracks, cuts, tol) {
     plan.sort(function (a, b) { return a.target - b.target; });
     for (i = 0; i < plan.length; i++) {
         var it = tracks[plan[i].ti].t.clips[plan[i].j];
-        if (!it) continue;
-        var delta = plan[i].target - it.start.seconds;
-        if (Math.abs(delta) < tol) continue;
-        var t = new Time();
-        t.seconds = delta;
-        try { it.move(t); } catch (e) {}
+        if (it) ytShiftTo(it, plan[i].target, tol);
     }
+    var left = 0;
     for (i = 0; i < plan.length; i++) {
         var it2 = tracks[plan[i].ti].t.clips[plan[i].j];
-        if (!it2 || Math.abs(it2.start.seconds - plan[i].target) > tol) return false;
+        if (!it2 || Math.abs(it2.start.seconds - plan[i].target) > tol) left++;
     }
-    return true;
+    return left === 0;
+}
+
+/* Put a clip's start at `target`, whichever way this build of Premiere allows.
+   move() is documented as a shift by a duration, but builds have differed on
+   whether the argument is relative or absolute, and `start` became writable
+   only in later versions. So: shift by the remaining distance and re-measure,
+   up to three times (an absolute-taking move() is corrected by the next pass),
+   then fall back to writing start directly. Each step is checked — the only
+   thing that counts is where the clip actually ended up. */
+function ytShiftTo(it, target, tol) {
+    var n, t, delta;
+    for (n = 0; n < 3; n++) {
+        delta = target - it.start.seconds;
+        if (Math.abs(delta) < tol) return true;
+        t = new Time();
+        t.seconds = delta;
+        try { it.move(t); } catch (e) {}
+        // landed exactly on `delta`: this build takes an absolute time — give it one
+        if (Math.abs(it.start.seconds - delta) < tol && Math.abs(delta - target) > tol) {
+            t = new Time();
+            t.seconds = target;
+            try { it.move(t); } catch (e1) {}
+        }
+    }
+    if (Math.abs(it.start.seconds - target) < tol) return true;
+    try {
+        t = new Time();
+        t.seconds = target;
+        it.start = t;
+    } catch (e2) {}
+    return Math.abs(it.start.seconds - target) < tol;
 }
 
 /* ---------- Sort project items into bins by type ---------- */

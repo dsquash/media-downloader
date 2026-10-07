@@ -254,9 +254,9 @@ function ytApplyRoughCut(dataJson) {
         var i, j, k;
 
         function targetTracks() {
-            var s = app.project.activeSequence, out = [], n;
-            for (n = 0; n < d.video.length; n++) out.push({ t: s.videoTracks[d.video[n]], v: true, idx: d.video[n] });
-            for (n = 0; n < d.audio.length; n++) out.push({ t: s.audioTracks[d.audio[n]], v: false, idx: d.audio[n] });
+            var out = [], n;
+            for (n = 0; n < d.video.length; n++) out.push({ t: seq.videoTracks[d.video[n]], v: true, idx: d.video[n] });
+            for (n = 0; n < d.audio.length; n++) out.push({ t: seq.audioTracks[d.audio[n]], v: false, idx: d.audio[n] });
             return out;
         }
         var tracks = targetTracks();
@@ -280,27 +280,28 @@ function ytApplyRoughCut(dataJson) {
             return ytStr({ error: "Every silent section overlaps unselected clips on the same tracks — select those too." });
         }
 
-        // 2. Backup: the original stays the active sequence, an untouched copy lands in the project.
+        // 2. Backup. clone() makes "<name> Copy" and switches to it; we keep working on
+        //    the original through the DOM object we already hold — never through
+        //    activeSequence, which may still point at the copy for a moment.
         var backup = "", id = seq.sequenceID, name = seq.name;
-        try {
-            if (seq.clone()) backup = name + " Copy";
-            if (app.project.activeSequence.sequenceID !== id) app.project.openSequence(id);
-        } catch (eB) {}
-        seq = app.project.activeSequence;
-        tracks = targetTracks();
+        try { if (seq.clone()) backup = name + " Copy"; } catch (eB) {}
+        try { app.project.openSequence(id); } catch (eO) {}
 
-        // 3. Razor. The QE DOM is the only razor Premiere exposes to scripts; it takes
-        //    a timecode string, so every cut edge is already frame-aligned by the panel.
+        // 3. Razor. The QE DOM is the only razor Premiere exposes to scripts. It takes a
+        //    timecode string, and which string it accepts isn't documented — so the first
+        //    cut is used to probe: each candidate format is tried until a clip edge
+        //    actually appears, and that format is used for the rest.
         app.enableQE();
-        var qs = qe.project.getActiveSequence();
+        var qs = ytQeSequenceFor(seq);
+        if (!qs) return ytStr({ error: "Premiere's QE layer did not expose the sequence — razor is unavailable." });
         var st = seq.getSettings();
         var zp = 0;
         try { zp = parseFloat(seq.zeroPoint) / 254016000000; } catch (eZ) {}
+        var formats = ytTimecodeFormats(st, d.frame);
 
-        function razorAll(sec, offset) {
-            var t = new Time();
-            t.seconds = sec + offset;
-            var code = t.getFormatted(st.videoFrameRate, st.videoDisplayFormat);
+        function razorAll(sec, fmt) {
+            var code;
+            try { code = fmt.f(sec); } catch (eF) { return; }
             for (var n = 0; n < tracks.length; n++) {
                 try {
                     (tracks[n].v ? qs.getVideoTrackAt(tracks[n].idx) : qs.getAudioTrackAt(tracks[n].idx)).razor(code);
@@ -317,12 +318,25 @@ function ytApplyRoughCut(dataJson) {
             return false;
         }
 
-        // Whether razor() wants timecode relative to the sequence's start timecode is not
-        // documented; try it, and if the first edge didn't land, fall back to plain time.
-        razorAll(cuts[0].s, zp);
-        if (zp && !edgeAt(cuts[0].s)) { zp = 0; razorAll(cuts[0].s, 0); }
-        razorAll(cuts[0].e, zp);
-        for (k = 1; k < cuts.length; k++) { razorAll(cuts[k].s, zp); razorAll(cuts[k].e, zp); }
+        var fmt = null, probe = cuts[0].s, tried = [];
+        for (var fi = 0; fi < formats.length && !fmt; fi++) {
+            // with the sequence's start timecode folded in first (if it has one), then without
+            var offs = zp ? [zp, 0] : [0];
+            for (var oi = 0; oi < offs.length && !fmt; oi++) {
+                var cand = { name: formats[fi].name + (offs[oi] ? "+zero" : ""),
+                             f: (function (base, off) { return function (sec) { return base(sec + off); }; })(formats[fi].f, offs[oi]) };
+                razorAll(probe, cand);
+                tried.push(cand.name);
+                if (edgeAt(probe)) fmt = cand;
+            }
+        }
+        if (!fmt) {
+            var qn = ""; try { qn = qs.name; } catch (eQ) {}
+            return ytStr({ error: "Razor isn't cutting. Tried " + tried.length + " timecode formats on QE sequence \u201c" +
+                                  qn + "\u201d (editing \u201c" + name + "\u201d). Nothing was changed." });
+        }
+        razorAll(cuts[0].e, fmt);
+        for (k = 1; k < cuts.length; k++) { razorAll(cuts[k].s, fmt); razorAll(cuts[k].e, fmt); }
         var edges = 0;
         for (k = 0; k < cuts.length; k++) { if (edgeAt(cuts[k].s)) edges++; if (edgeAt(cuts[k].e)) edges++; }
 
@@ -410,8 +424,8 @@ function ytApplyRoughCut(dataJson) {
 
         if (!removed) {
             return ytStr({ error: "Nothing was removed. Razor placed " + edges + " of " + (cuts.length * 2) +
-                                  " edges; " + missed + " section(s) didn't line up, " + stuck +
-                                  " piece(s) refused to delete." });
+                                  " edges (format " + fmt.name + "); " + missed + " section(s) didn't line up, " +
+                                  stuck + " piece(s) refused to delete." });
         }
 
         return ytStr({ applied: applied.length, removed: removed, skipped: skipped, missed: missed, stuck: stuck,
@@ -689,6 +703,51 @@ function ytPlaceSfx(seq, d, points, tol) {
     } catch (err) {
         return { error: "Placing the sound failed: " + err };
     }
+}
+
+/* The QE twin of a DOM sequence. Matched by id, then by name; the active one is
+   only a last resort — after clone() it may well be the copy. */
+function ytQeSequenceFor(seq) {
+    var id = "", nm = "";
+    try { id = String(seq.sequenceID); } catch (e0) {}
+    try { nm = String(seq.name); } catch (e1) {}
+    var byName = null, active = null;
+    try { active = qe.project.getActiveSequence(); } catch (e2) {}
+    try {
+        for (var i = 0; i < qe.project.numSequences; i++) {
+            var q = qe.project.getSequenceAt(i);
+            if (!q) continue;
+            var g = "";
+            try { g = String(q.guid); } catch (e3) {}
+            if (id && g && g === id) return q;
+            try { if (!byName && q.name === nm) byName = q; } catch (e4) {}
+        }
+    } catch (e5) {}
+    if (byName) return byName;
+    return active;
+}
+
+/* Candidate razor() arguments, most likely first. HH:MM:SS:FF is built by hand as
+   well as via getFormatted, since the latter depends on the display-format enum. */
+function ytTimecodeFormats(st, frame) {
+    var fps = 1 / frame, nominal = Math.round(fps);
+    var drop = Math.abs(fps - nominal) > 0.01;        // 29.97 / 59.94
+    function two(n) { return (n < 10 ? "0" : "") + n; }
+    function hmsf(sep) {
+        return function (sec) {
+            var total = Math.round(sec / frame), fr = total % nominal, s = Math.floor(total / nominal);
+            return two(Math.floor(s / 3600)) + ":" + two(Math.floor(s / 60) % 60) + ":" + two(s % 60) + sep + two(fr);
+        };
+    }
+    var list = [
+        { name: "getFormatted", f: function (sec) { var t = new Time(); t.seconds = sec; return t.getFormatted(st.videoFrameRate, st.videoDisplayFormat); } },
+        { name: "hh:mm:ss:ff", f: hmsf(":") },
+    ];
+    if (drop) list.push({ name: "hh:mm:ss;ff", f: hmsf(";") });
+    list.push({ name: "ticks", f: function (sec) { var t = new Time(); t.seconds = sec; return String(t.ticks); } });
+    list.push({ name: "frames", f: function (sec) { return String(Math.round(sec / frame)); } });
+    list.push({ name: "seconds", f: function (sec) { return String(sec); } });
+    return list;
 }
 
 /* Delete one razored piece and make sure it is really gone: remove() throws on

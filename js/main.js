@@ -1048,6 +1048,7 @@ function roughCutWith(sfx) {
                     if (sfx) msg += sfxNote(r.sfxPlaced, r.sfxNoRoom);
                     if (r.skipped) msg += " " + r.skipped + " skipped (unselected clips on the same tracks).";
                     if (r.missed) msg += " " + r.missed + " could not be cut cleanly and were left alone.";
+                    if (r.stuck) msg += " " + r.stuck + " piece(s) refused to delete — remove them by hand.";
                     if (r.backup) msg += " Original kept as “" + r.backup + "”.";
                     toolsDone(prefix + msg, false);
                 });

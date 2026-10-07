@@ -323,11 +323,18 @@ function ytApplyRoughCut(dataJson) {
         if (zp && !edgeAt(cuts[0].s)) { zp = 0; razorAll(cuts[0].s, 0); }
         razorAll(cuts[0].e, zp);
         for (k = 1; k < cuts.length; k++) { razorAll(cuts[k].s, zp); razorAll(cuts[k].e, zp); }
+        var edges = 0;
+        for (k = 0; k < cuts.length; k++) { if (edgeAt(cuts[k].s)) edges++; if (edgeAt(cuts[k].e)) edges++; }
 
         // 4. Remove the silent pieces. A cut only counts if every overlapping piece on
         //    every target track now sits fully inside it — a razor that missed one track
         //    would otherwise leave that track out of step with the rest.
-        var removed = 0, missed = 0, applied = [];
+        //    One piece per cut is kept back for now: closing the gap later is done by
+        //    ripple-deleting that last piece, Premiere's own Shift+Delete, which only
+        //    closes a gap that is empty on every unlocked track — so everything else in
+        //    the cut has to be gone first.
+        var removed = 0, missed = 0, stuck = 0, applied = [], handles = [];
+        var slack = d.frame + tol;
         for (k = 0; k < cuts.length; k++) {
             var cut = cuts[k], batch = [], bad = false;
             for (i = 0; i < tracks.length && !bad; i++) {
@@ -335,24 +342,28 @@ function ytApplyRoughCut(dataJson) {
                 for (j = 0; j < cl2.numItems; j++) {
                     var p = cl2[j], ps = p.start.seconds, pe = p.end.seconds;
                     if (pe <= cut.s + tol || ps >= cut.e - tol) continue;
-                    if (ps >= cut.s - tol && pe <= cut.e + tol) batch.push(p); else { bad = true; break; }
+                    if (ps >= cut.s - slack && pe <= cut.e + slack) batch.push({ it: p, tr: tracks[i].t, s: ps });
+                    else { bad = true; break; }
                 }
             }
             if (bad || !batch.length) { missed++; continue; }
-            for (j = 0; j < batch.length; j++) {
-                try { batch[j].remove(false, false); removed++; } catch (eX) {}
+            for (j = 1; j < batch.length; j++) {
+                if (ytRemovePiece(batch[j], false, tol)) removed++; else stuck++;
             }
             applied.push(cut);
+            handles.push(batch[0]);
         }
 
         // Punch-in has to happen before the gaps close: the pieces are found by the
         // positions the selected clips had, and the TrackItem refs stay valid after moving.
+        // The held-back silent piece in each cut is not a piece of the edit — skip it.
         var punched = 0, pairs = [];
         if (d.punch && d.ranges && applied.length) {
             for (i = 0; i < d.video.length; i++) {
                 var vt = seq.videoTracks[d.video[i]], pieces = [];
                 for (j = 0; j < vt.clips.numItems; j++) {
                     var pc = vt.clips[j];
+                    if (ytInsideAny(pc, applied, tol)) continue;
                     for (var r = 0; r < d.ranges.length; r++) {
                         var rg = d.ranges[r];
                         if (rg.track === d.video[i] && pc.start.seconds >= rg.s - tol && pc.end.seconds <= rg.e + tol) {
@@ -367,7 +378,26 @@ function ytApplyRoughCut(dataJson) {
 
         var saved = 0;
         for (k = 0; k < applied.length; k++) saved += applied[k].e - applied[k].s;
-        var closed = d.close && applied.length ? ytCloseGaps(tracks, applied, tol) : false;
+
+        // 5. Close the gaps — last cut first, so each earlier cut's position is still
+        //    what it was when the following piece is checked against it.
+        var closed = true;
+        for (k = applied.length - 1; k >= 0; k--) {
+            var cutK = applied[k], h = handles[k];
+            if (!d.close) {
+                if (ytRemovePiece(h, false, tol)) removed++; else stuck++;
+                continue;
+            }
+            if (ytRemovePiece(h, true, tol)) removed++;
+            else if (ytRemovePiece(h, false, tol)) removed++;
+            else stuck++;
+            if (ytGapClosed(tracks, cutK, tol)) continue;
+            // the ripple was refused (something on another unlocked track spans the gap,
+            // or this build doesn't ripple from scripts) — slide the target tracks by hand
+            ytCloseGaps(tracks, [cutK], tol);
+            if (!ytGapClosed(tracks, cutK, tol)) closed = false;
+        }
+        if (!d.close) closed = false;
 
         // read the punch-in points only now: the pieces have moved, their refs followed
         var sfx = { placed: 0, noRoom: 0, points: 0 };
@@ -378,7 +408,13 @@ function ytApplyRoughCut(dataJson) {
         }
         if (sfx.error) return ytStr({ error: sfx.error });
 
-        return ytStr({ applied: applied.length, removed: removed, skipped: skipped, missed: missed,
+        if (!removed) {
+            return ytStr({ error: "Nothing was removed. Razor placed " + edges + " of " + (cuts.length * 2) +
+                                  " edges; " + missed + " section(s) didn't line up, " + stuck +
+                                  " piece(s) refused to delete." });
+        }
+
+        return ytStr({ applied: applied.length, removed: removed, skipped: skipped, missed: missed, stuck: stuck,
                        saved: saved, closed: closed, backup: backup, punched: punched,
                        sfxPlaced: sfx.placed, sfxNoRoom: sfx.noRoom });
     } catch (err) {
@@ -653,6 +689,47 @@ function ytPlaceSfx(seq, d, points, tol) {
     } catch (err) {
         return { error: "Placing the sound failed: " + err };
     }
+}
+
+/* Delete one razored piece and make sure it is really gone: remove() throws on
+   some builds and silently does nothing on others, so the track is re-read. */
+function ytRemovePiece(piece, ripple, tol) {
+    var e0 = piece.it.end.seconds, id0 = null;
+    try { id0 = piece.it.nodeId; } catch (eI) {}
+    try { piece.it.remove(ripple, ripple); } catch (e) {}
+    var cl = piece.tr.clips;
+    for (var j = 0; j < cl.numItems; j++) {
+        if (Math.abs(cl[j].start.seconds - piece.s) >= tol) continue;
+        // something sits where the piece was. After a ripple that is expected — the
+        // next clip slid in — so only the very same item counts as "still there".
+        if (!ripple) return false;
+        var id1 = null;
+        try { id1 = cl[j].nodeId; } catch (eJ) {}
+        var same = (id0 !== null && id1 !== null) ? id0 === id1 : Math.abs(cl[j].end.seconds - e0) < tol;
+        if (same) return false;
+    }
+    return true;
+}
+
+function ytInsideAny(clip, cuts, tol) {
+    var s = clip.start.seconds, e = clip.end.seconds;
+    for (var k = 0; k < cuts.length; k++) if (s >= cuts[k].s - tol && e <= cuts[k].e + tol) return true;
+    return false;
+}
+
+/* After a gap at `cut` is closed, whatever came next now starts at cut.s. If nothing
+   on the target tracks follows the cut at all, there was no gap to close. */
+function ytGapClosed(tracks, cut, tol) {
+    var follows = false;
+    for (var i = 0; i < tracks.length; i++) {
+        var cl = tracks[i].t.clips;
+        for (var j = 0; j < cl.numItems; j++) {
+            var st = cl[j].start.seconds;
+            if (Math.abs(st - cut.s) < tol) return true;
+            if (st > cut.s + tol) follows = true;
+        }
+    }
+    return !follows;
 }
 
 /* Slide everything after each removed section left, on the target tracks only.

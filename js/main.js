@@ -848,9 +848,10 @@ function analyzeRange(src, opts, onProgress, cb) {
     });
     proc.stdout.on("data", function () {});
     proc.on("error", function (err) { currentProc = null; cb("ffmpeg: " + err.message); });
-    proc.on("close", function () {
+    proc.on("close", function (code) {
         currentProc = null;
-        var r = { noAudio: !/Stream #[^\n]*Audio:/.test(out), sil: [], lufs: null, peak: null };
+        var r = { noAudio: !/Stream #[^\n]*Audio:/.test(out), sil: [], lufs: null, peak: null,
+                  tail: ffTail(out), failed: code !== 0 };
         if (r.noAudio) { cb(null, r); return; }
 
         if (opts.silence) {
@@ -865,14 +866,48 @@ function analyzeRange(src, opts, onProgress, cb) {
         }
         if (opts.loudness) {
             // per-frame lines also carry "I:", the summary is always the last one
-            var li = out.match(/\bI:\s+-?[\d.]+ LUFS/g);
+            var li = out.match(/\bI:\s+(-?[\d.]+|-inf) LUFS/g);
             var pk = out.match(/Peak:\s+(-?[\d.]+|-inf) dBFS/g);
-            if (li) r.lufs = parseFloat(li[li.length - 1].match(/-?[\d.]+/)[0]);
+            if (li) {
+                var lv = li[li.length - 1].match(/(-?[\d.]+|-inf) LUFS/)[1];
+                r.lufs = lv === "-inf" ? -Infinity : parseFloat(lv);
+            }
             if (pk) {
                 var pv = pk[pk.length - 1].match(/(-?[\d.]+|-inf) dBFS/)[1];
                 r.peak = pv === "-inf" ? -Infinity : parseFloat(pv);
             }
+            // ebur128 printed nothing usable — measure again with loudnorm, a separate
+            // filter that reports the same figures as JSON
+            if (r.lufs === null) { measureLoudnorm(src, dur, r, cb); return; }
         }
+        cb(null, r);
+    });
+}
+
+/* The last lines ffmpeg wrote — where its own complaint sits when it fails. */
+function ffTail(out) {
+    var lines = out.split(/\r?\n|\r/).filter(function (l) {
+        return l.trim() && !/^\[Parsed_ebur128_\d+ @ [^\]]+\] t:/.test(l) && !/^(size|frame)=/.test(l);
+    });
+    return lines.slice(-12).join("\n");
+}
+
+function measureLoudnorm(src, dur, r, cb) {
+    var args = ["-hide_banner", "-ss", String(src.inPoint), "-t", String(dur), "-i", src.filePath,
+                "-vn", "-sn", "-dn", "-af", "loudnorm=print_format=json", "-f", "null", "-"];
+    var proc = cp.spawn(findBinary("ffmpeg"), args);
+    currentProc = proc;
+    var out = "";
+    proc.stderr.on("data", function (d) { out += d.toString(); });
+    proc.stdout.on("data", function () {});
+    proc.on("error", function () { currentProc = null; cb(null, r); });
+    proc.on("close", function () {
+        currentProc = null;
+        var mi = out.match(/"input_i"\s*:\s*"(-?[\d.]+|-inf)"/);
+        var mp = out.match(/"input_tp"\s*:\s*"(-?[\d.]+|-inf)"/);
+        if (mi) r.lufs = mi[1] === "-inf" ? -Infinity : parseFloat(mi[1]);
+        if (mp) r.peak = mp[1] === "-inf" ? -Infinity : parseFloat(mp[1]);
+        if (r.lufs === null) r.tail = ffTail(out);   // the second attempt's complaint is the useful one
         cb(null, r);
     });
 }
@@ -960,6 +995,15 @@ function gainFor(r, target) {
     return Math.round(g * 10) / 10;
 }
 
+/* Why a clip got no gain — one short phrase, for the status line. */
+function noGainReason(r) {
+    if (!r) return "not analysed";
+    if (r.noAudio) return r.failed ? "ffmpeg could not open the file" : "no audio stream";
+    if (r.lufs === null) return "loudness not reported";
+    if (r.lufs < -60) return "silent (" + (isFinite(r.lufs) ? r.lufs + " LUFS" : "-inf") + ")";
+    return "";
+}
+
 function applyGain(items, results, target, cb) {
     var list = [];
     items.forEach(function (it) {
@@ -967,7 +1011,20 @@ function applyGain(items, results, target, cb) {
         var g = gainFor(results[it.key], target);
         if (g !== null) list.push({ track: it.track, seqStart: it.seqStart, gain: g });
     });
-    if (!list.length) { cb("None of the selected clips has measurable audio."); return; }
+    if (!list.length) {
+        // say what went wrong per clip, and leave ffmpeg's own words in the log
+        var why = {}, tail = "";
+        items.forEach(function (it) {
+            if (it.kind !== "audio") return;
+            var r = results[it.key], reason = noGainReason(r);
+            why[reason] = (why[reason] || 0) + 1;
+            if (!tail && r && r.tail) tail = r.tail;
+        });
+        var parts = Object.keys(why).map(function (k) { return why[k] + " \u00d7 " + k; });
+        if (tail) { logLine("--- ffmpeg said ---"); logLine(tail); showLog(); }
+        cb("Nothing to normalize: " + parts.join(", ") + "." + (tail ? " See the log below." : ""));
+        return;
+    }
     setStatus("Setting clip volume…");
     cs.evalScript("ytSetClipGain(" + JSON.stringify(JSON.stringify(list)) + ")", function (res) {
         var r;

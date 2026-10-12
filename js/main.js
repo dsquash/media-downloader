@@ -312,15 +312,28 @@ function ensureAssetsDir(projDir) {
 
 /* ---------- yt-dlp ---------- */
 
+/* First copy of the tool that actually starts: bin/ first, then Homebrew & co.
+   A file being there proves nothing — a binary copied out of Homebrew dies the
+   moment Homebrew upgrades and deletes the libraries it was linked against, and
+   one built for the wrong CPU never ran at all. Checked once, then cached. */
+var binCache = {};
+
 function findBinary(name) {
+    if (binCache[name]) return binCache[name];
     var local = path.join(extDir, "bin", isWin ? name + ".exe" : name);
-    if (fs.existsSync(local)) return local;
-    // fallback: PATH (including homebrew on Mac)
-    var candidates = isWin ? [] : ["/opt/homebrew/bin/" + name, "/usr/local/bin/" + name, "/usr/bin/" + name];
+    var candidates = [local].concat(isWin ? [] : ["/opt/homebrew/bin/" + name, "/usr/local/bin/" + name, "/usr/bin/" + name]);
+    var flag = name === "yt-dlp" ? "--version" : "-version";
+    var firstExisting = null;
     for (var i = 0; i < candidates.length; i++) {
-        if (fs.existsSync(candidates[i])) return candidates[i];
+        if (!fs.existsSync(candidates[i])) continue;
+        if (!firstExisting) firstExisting = candidates[i];
+        try {
+            cp.execFileSync(candidates[i], [flag], { stdio: "ignore", timeout: 15000 });
+            return (binCache[name] = candidates[i]);
+        } catch (e) {}
     }
-    return name; // hope it is in PATH
+    // nothing runs: hand back the first one anyway so the failure surfaces with its own error
+    return firstExisting || name;
 }
 
 function validTimestamp(t) {
@@ -929,6 +942,17 @@ function analyzeAll(items, opts, cb) {
             elProgressBar.style.width = Math.round((i + f) / jobs.length * 100) + "%";
         }, function (err, r) {
             if (err) { cb(err); return; }
+            // ffmpeg that dies before reading a stream looks just like a file without
+            // audio — which Rough Cut would quietly skip. Stop and show what it said.
+            if (r.failed && r.noAudio) {
+                logLine("--- ffmpeg said ---");
+                logLine(r.tail);
+                showLog();
+                var first = (r.tail.split("\n").filter(function (l) { return l.trim(); })[0] || "").slice(0, 140);
+                cb("ffmpeg failed on " + path.basename(job.filePath) + ": " + first +
+                   " — re-run the install command (Project tab).");
+                return;
+            }
             results[job.key] = r;
             i++;
             next();

@@ -76,8 +76,11 @@ for tool in ffmpeg ffprobe; do
   if place "https://github.com/eugeneware/ffmpeg-static/releases/latest/download/$tool-darwin-$ARCH_TAG" "$dest" "-version"; then
     ok "      $tool ok"
   elif sys="$(command -v "$tool" 2>/dev/null)" && [ -n "$sys" ] \
-       && cp "$sys" "$dest" 2>/dev/null && runs "$dest" "-version"; then
-    ok "      $tool ok — copied from $sys"
+       && ln -sf "$sys" "$dest" 2>/dev/null && runs "$dest" "-version"; then
+    # a link, never a copy: Homebrew's ffmpeg loads libraries from a versioned
+    # Cellar folder that the next `brew upgrade` deletes; /opt/homebrew/bin/ffmpeg
+    # always points at whatever version is current
+    ok "      $tool ok — linked to $sys"
   else
     rm -f "$dest"
     warn "      ! $tool could not be installed — run:  brew install ffmpeg"

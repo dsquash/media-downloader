@@ -53,13 +53,34 @@ ok "      installed to $DEST"
 # ${2:--version} default would expand to "-version" — ":-" eats the first dash)
 runs() { [ -x "$1" ] && "$1" "$2" >/dev/null 2>&1; }
 
-place() {           # place <url> <dest> <version-flag> — download, unquarantine, verify
-  local url="$1" dest="$2" flag="$3"
-  curl -fsSL "$url" -o "$dest.tmp" || { rm -f "$dest.tmp"; return 1; }
+# place <url> <dest> <version-flag> — download, unquarantine, verify.
+# On failure $WHY says which step broke and what the tool itself printed —
+# "could not be installed" alone leaves nothing to go on.
+WHY=""
+place() {
+  local url="$1" dest="$2" flag="$3" err
+  if ! err="$(curl -fsSL "$url" -o "$dest.tmp" 2>&1)"; then
+    rm -f "$dest.tmp"
+    WHY="download failed — ${err:-no response from $url}"
+    return 1
+  fi
   chmod +x "$dest.tmp"
   xattr -dr com.apple.quarantine "$dest.tmp" 2>/dev/null
-  runs "$dest.tmp" "$flag" || { rm -f "$dest.tmp"; return 1; }
+  if ! err="$("$dest.tmp" "$flag" 2>&1)"; then
+    WHY="downloaded ($(wc -c < "$dest.tmp" | tr -d ' ') bytes) but it won't start — $(printf '%s' "$err" | tail -n 3)"
+    rm -f "$dest.tmp"
+    return 1
+  fi
   mv -f "$dest.tmp" "$dest"
+}
+
+# link <tool> <dest> <version-flag> — fall back to a copy already on this machine.
+# A link, never a copy: Homebrew's binaries load libraries from a versioned Cellar
+# folder that the next `brew upgrade` deletes; the stable path always follows it.
+link_system() {
+  local sys
+  sys="$(command -v "$1" 2>/dev/null)" || return 1
+  [ -n "$sys" ] && ln -sf "$sys" "$2" 2>/dev/null && runs "$2" "$3" && echo "$sys"
 }
 
 if [ "$(uname -m)" = "arm64" ]; then ARCH_TAG="arm64"; else ARCH_TAG="x64"; fi
@@ -67,7 +88,12 @@ if [ "$(uname -m)" = "arm64" ]; then ARCH_TAG="arm64"; else ARCH_TAG="x64"; fi
 step "[3/5] Installing yt-dlp…"
 if place "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos" "$DEST/bin/yt-dlp" "--version"; then
   ok "      done"
+elif sys="$(link_system yt-dlp "$DEST/bin/yt-dlp" "--version")"; then
+  warn "      ! official build: $WHY"
+  ok "      using the yt-dlp already on this Mac — linked to $sys"
 else
+  rm -f "$DEST/bin/yt-dlp"
+  warn "      ! $WHY"
   die "      ! yt-dlp could not be installed — the extension cannot work without it."
 fi
 
@@ -77,14 +103,11 @@ for tool in ffmpeg ffprobe; do
   dest="$DEST/bin/$tool"
   if place "https://github.com/eugeneware/ffmpeg-static/releases/latest/download/$tool-darwin-$ARCH_TAG" "$dest" "-version"; then
     ok "      $tool ok"
-  elif sys="$(command -v "$tool" 2>/dev/null)" && [ -n "$sys" ] \
-       && ln -sf "$sys" "$dest" 2>/dev/null && runs "$dest" "-version"; then
-    # a link, never a copy: Homebrew's ffmpeg loads libraries from a versioned
-    # Cellar folder that the next `brew upgrade` deletes; /opt/homebrew/bin/ffmpeg
-    # always points at whatever version is current
-    ok "      $tool ok — linked to $sys"
+  elif sys="$(link_system "$tool" "$dest" "-version")"; then
+    ok "      $tool ok — linked to $sys  ($WHY)"
   else
     rm -f "$dest"
+    warn "      ! $tool: $WHY"
     warn "      ! $tool could not be installed — run:  brew install ffmpeg"
   fi
 done

@@ -49,10 +49,12 @@ ok "      installed to $DEST"
 # only "ffmpeg is not installed" and you go looking in the wrong place entirely.
 # That is exactly what evermeet.cx's x86_64-only builds did on Apple Silicon, so
 # every tool below is run once before it is accepted.
-runs() { [ -x "$1" ] && "$1" "${2:--version}" >/dev/null 2>&1; }
+# $2 is required: ffmpeg wants -version, yt-dlp and deno want --version (and a
+# ${2:--version} default would expand to "-version" — ":-" eats the first dash)
+runs() { [ -x "$1" ] && "$1" "$2" >/dev/null 2>&1; }
 
-place() {           # place <url> <dest> [version-flag] — download, unquarantine, verify
-  local url="$1" dest="$2" flag="${3:--version}"
+place() {           # place <url> <dest> <version-flag> — download, unquarantine, verify
+  local url="$1" dest="$2" flag="$3"
   curl -fsSL "$url" -o "$dest.tmp" || { rm -f "$dest.tmp"; return 1; }
   chmod +x "$dest.tmp"
   xattr -dr com.apple.quarantine "$dest.tmp" 2>/dev/null
@@ -63,7 +65,7 @@ place() {           # place <url> <dest> [version-flag] — download, unquaranti
 if [ "$(uname -m)" = "arm64" ]; then ARCH_TAG="arm64"; else ARCH_TAG="x64"; fi
 
 step "[3/5] Installing yt-dlp…"
-if place "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos" "$DEST/bin/yt-dlp"; then
+if place "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos" "$DEST/bin/yt-dlp" "--version"; then
   ok "      done"
 else
   die "      ! yt-dlp could not be installed — the extension cannot work without it."
@@ -97,7 +99,7 @@ fi
 if curl -fsSL "https://github.com/denoland/deno/releases/latest/download/$DENO_ZIP" -o "$TMP/deno.zip" \
    && unzip -oq "$TMP/deno.zip" -d "$TMP" 2>/dev/null \
    && chmod +x "$TMP/deno" \
-   && { xattr -dr com.apple.quarantine "$TMP/deno" 2>/dev/null; runs "$TMP/deno"; }; then
+   && { xattr -dr com.apple.quarantine "$TMP/deno" 2>/dev/null; runs "$TMP/deno" "--version"; }; then
   mv -f "$TMP/deno" "$DEST/bin/deno"
   ok "      done"
 else

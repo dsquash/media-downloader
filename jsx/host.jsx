@@ -402,12 +402,14 @@ function ytApplyRoughCut(dataJson) {
                 if (ytRemovePiece(h, false, tol)) removed++; else stuck++;
                 continue;
             }
-            if (ytRemovePiece(h, true, tol)) removed++;
-            else if (ytRemovePiece(h, false, tol)) removed++;
-            else stuck++;
+            // delete the last piece plainly, then ripple-delete the empty gap it leaves —
+            // exactly Shift+Delete on a gap. The DOM's remove(ripple) didn't move anything
+            // on the user's Premiere; QE's rippleDelete() is what working scripts use.
+            if (ytRemovePiece(h, false, tol)) removed++; else stuck++;
             if (ytGapClosed(tracks, cutK, tol)) continue;
-            // the ripple was refused (something on another unlocked track spans the gap,
-            // or this build doesn't ripple from scripts) — slide the target tracks by hand
+            ytQeRippleGap(qs, tracks, cutK, tol);
+            if (ytGapClosed(tracks, cutK, tol)) continue;
+            // last resort: slide the target tracks by hand
             ytCloseGaps(tracks, [cutK], tol);
             if (!ytGapClosed(tracks, cutK, tol)) closed = false;
         }
@@ -768,6 +770,38 @@ function ytRemovePiece(piece, ripple, tol) {
         if (same) return false;
     }
     return true;
+}
+
+/* QE seconds of a QE time object — its fields vary across builds. */
+function ytQeSecs(t) {
+    if (!t) return NaN;
+    try { if (t.secs !== undefined && !isNaN(parseFloat(t.secs))) return parseFloat(t.secs); } catch (e) {}
+    try { if (t.ticks !== undefined) return parseFloat(t.ticks) / 254016000000; } catch (e2) {}
+    return NaN;
+}
+
+/* Ripple-delete the empty gap starting at cut.s on the first target track that has
+   one. Premiere only allows it when every unlocked track is empty across the gap —
+   the same rule as doing it by hand. Returns true if a gap item was found and hit. */
+function ytQeRippleGap(qs, tracks, cut, tol) {
+    for (var n = 0; n < tracks.length; n++) {
+        var qt;
+        try { qt = tracks[n].v ? qs.getVideoTrackAt(tracks[n].idx) : qs.getAudioTrackAt(tracks[n].idx); } catch (e) { continue; }
+        if (!qt) continue;
+        var count = 0;
+        try { count = qt.numItems; } catch (e1) {}
+        for (var i = 0; i < count; i++) {
+            var it;
+            try { it = qt.getItemAt(i); } catch (e2) { continue; }
+            if (!it) continue;
+            var type = "";
+            try { type = String(it.type); } catch (e3) {}
+            if (!/empty/i.test(type)) continue;
+            if (Math.abs(ytQeSecs(it.start) - cut.s) > tol) continue;
+            try { it.rippleDelete(); return true; } catch (e4) {}
+        }
+    }
+    return false;
 }
 
 function ytInsideAny(clip, cuts, tol) {

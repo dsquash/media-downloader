@@ -11,7 +11,7 @@ into bins**, and **Paste screenshot from clipboard**.
 
 ## Rough Cut & Normalize (Premiere Pro)
 
-Select one or more clips on the timeline — linked video and audio together — and:
+Select one or more clips on the timeline — linked video and audio together — and click a tool in the **Edit** tab. Clicking runs it straight away; ⚙ next to it shows its settings, which are remembered.
 
 **✂ Rough Cut selected clips** removes the silences.
 
@@ -20,7 +20,7 @@ Select one or more clips on the timeline — linked video and audio together —
 | Threshold | quieter than this counts as silence. Raise it (e.g. `-25`) for noisy rooms |
 | Min silence | pauses shorter than this are kept |
 | Pad | kept on both sides of every cut, so words aren't clipped |
-| Close gaps | ripple-deletes each silence (Premiere's own Shift+Delete), so what follows slides left on every unlocked track; off leaves the gaps in place |
+| Ripple delete | ripple-deletes each silence (Premiere's own Shift+Delete on the gap), so what follows slides left on every unlocked track; off leaves the gaps in place |
 | Normalize first | applies Normalize (below) before cutting, so every piece gets the same volume |
 | Punch-in | zooms in on every second piece after cutting (see below) |
 

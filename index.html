@@ -128,25 +128,30 @@
     color: #d8d8d8; font-family: inherit; font-size: 11px; padding: 7px 8px; outline: none; user-select: text;
   }
 
-  /* ── edit pane: one collapsible card per tool ── */
-  details.tool {
+  /* ── tools: one row each — click runs it, ⚙ shows its settings ── */
+  .tool {
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    margin-bottom: 8px;
+    margin-bottom: 8px; overflow: hidden;
   }
-  details.tool summary {
-    list-style: none; display: flex; align-items: center; gap: 9px;
-    padding: 10px 12px; cursor: pointer; outline: none;
+  .tool-row { display: flex; }
+  .run {
+    flex: 1; display: flex; align-items: center; gap: 10px; text-align: left;
+    background: none; border: none; color: #ececec; font-family: inherit;
+    font-size: 12.5px; font-weight: 600; padding: 12px; cursor: pointer;
+    transition: background .12s;
   }
-  details.tool summary::-webkit-details-marker { display: none; }
-  details.tool summary:hover { background: var(--surface-2); border-radius: var(--radius); }
-  details.tool[open] summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+  .run:hover:not(:disabled) { background: var(--accent); color: #fff; }
+  .run:disabled { color: #666; cursor: default; }
+  .run.busy, .run.busy:disabled { background: var(--accent); color: #fff; }
+  .run.busy::after { content: "…"; }
   .t-icon { width: 18px; text-align: center; font-size: 13px; }
-  .t-name { font-weight: 600; color: #ececec; }
-  .t-desc { flex: 1; font-size: 10.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .chev { width: 6px; height: 6px; border-right: 1.5px solid var(--text-dim); border-bottom: 1.5px solid var(--text-dim); transform: rotate(-45deg); transition: transform .15s; flex-shrink: 0; }
-  details.tool[open] .chev { transform: rotate(45deg); }
-  .t-body { padding: 10px 12px 12px; }
-  .t-body p.help { font-size: 10.5px; color: var(--text-dim); line-height: 1.5; margin-bottom: 10px; }
+  .gear {
+    width: 40px; flex-shrink: 0; background: none; border: none; border-left: 1px solid var(--border);
+    color: var(--text-faint); font-size: 13px; cursor: pointer;
+  }
+  .gear:hover, .tool.open .gear { color: #fff; background: var(--surface-2); }
+  .settings { display: none; padding: 10px 12px 4px; border-top: 1px solid var(--border); }
+  .tool.open .settings { display: block; }
 
   .fields { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
   .f { flex: 1; min-width: 80px; }
@@ -164,7 +169,7 @@
   /* ── project pane ── */
   .card .btn { margin-top: 2px; }
   #projectInfo {
-    margin-top: -3px;
+    margin: 14px 2px 0;
     font-size: 10.5px; color: var(--text-dim); line-height: 1.5;
     word-break: break-all; white-space: pre-line;
   }
@@ -215,9 +220,8 @@
     <!-- ════════ Download ════════ -->
     <section class="pane" id="pane-download">
 
-      <label class="lbl" for="url">Video link</label>
       <div class="url-row">
-        <input type="text" id="url" placeholder="https://…">
+        <input type="text" id="url" placeholder="Paste a video link…">
         <button id="btnPasteUrl" class="mini" title="Paste link from clipboard">📋</button>
       </div>
 
@@ -247,75 +251,86 @@
     <!-- ════════ Edit ════════ -->
     <section class="pane" id="pane-edit">
 
-      <details class="tool" id="tool-rc" open>
-        <summary><span class="t-icon">✂</span><span class="t-name">Rough Cut</span><span class="t-desc">remove silences</span><span class="chev"></span></summary>
-        <div class="t-body">
+      <div class="tool" id="tool-rc">
+        <div class="tool-row">
+          <button id="btnRoughCut" class="run"><span class="t-icon">✂</span>Rough Cut</button>
+          <button class="gear" title="Settings">⚙</button>
+        </div>
+        <div class="settings">
           <div class="fields">
-            <label class="f" title="Anything quieter than this counts as silence. Raise it (e.g. -25) for noisy rooms."><span>Threshold</span><div class="in"><input type="text" id="rcThreshold" value="-30"><em>dB</em></div></label>
-            <label class="f" title="Pauses shorter than this are kept."><span>Min silence</span><div class="in"><input type="text" id="rcMinDur" value="0.5"><em>s</em></div></label>
-            <label class="f" title="Kept on both sides of every cut, so words aren't clipped."><span>Pad</span><div class="in"><input type="text" id="rcPad" value="0.1"><em>s</em></div></label>
+            <label class="f" title="Quieter than this = silence. Noisy room: try -25."><span>Threshold</span><div class="in"><input type="text" id="rcThreshold" value="-30"><em>dB</em></div></label>
+            <label class="f" title="Shorter pauses are kept."><span>Min pause</span><div class="in"><input type="text" id="rcMinDur" value="0.5"><em>s</em></div></label>
+            <label class="f" title="Kept around each cut so words aren't clipped."><span>Pad</span><div class="in"><input type="text" id="rcPad" value="0.1"><em>s</em></div></label>
           </div>
           <div class="row">
-            <label class="chk" title="Slide the rest of the edit left so no empty gaps remain."><input type="checkbox" id="rcClose" checked> Close gaps</label>
-            <label class="chk" title="Bring the clips to the Normalize target before cutting."><input type="checkbox" id="rcNorm"> Normalize first</label>
-            <label class="chk" title="Zoom in on every second piece after cutting (Punch-in settings)."><input type="checkbox" id="rcPunch"> Punch-in</label>
+            <label class="chk"><input type="checkbox" id="rcClose" checked> Ripple delete</label>
+            <label class="chk"><input type="checkbox" id="rcNorm"> Normalize</label>
+            <label class="chk"><input type="checkbox" id="rcPunch"> Punch-in</label>
           </div>
-          <button id="btnRoughCut" class="btn primary">Rough Cut selected clips</button>
         </div>
-      </details>
+      </div>
 
-      <details class="tool" id="tool-norm">
-        <summary><span class="t-icon">🔊</span><span class="t-name">Normalize</span><span class="t-desc">even out loudness</span><span class="chev"></span></summary>
-        <div class="t-body">
+      <div class="tool" id="tool-norm">
+        <div class="tool-row">
+          <button id="btnNormalize" class="run"><span class="t-icon">🔊</span>Normalize</button>
+          <button class="gear" title="Settings">⚙</button>
+        </div>
+        <div class="settings">
           <div class="fields">
-            <label class="f" title="-16 LUFS suits most online video; -14 is louder (YouTube, social)."><span>Target</span><div class="in"><input type="text" id="normTarget" value="-16"><em>LUFS</em></div></label>
+            <label class="f" title="-16 for most video, -14 louder (YouTube, social)."><span>Target</span><div class="in"><input type="text" id="normTarget" value="-16"><em>LUFS</em></div></label>
           </div>
-          <button id="btnNormalize" class="btn primary">Normalize selected clips</button>
         </div>
-      </details>
+      </div>
 
-      <details class="tool" id="tool-punch">
-        <summary><span class="t-icon">🔍</span><span class="t-name">Punch-in</span><span class="t-desc">alternate wide / close</span><span class="chev"></span></summary>
-        <div class="t-body">
+      <div class="tool" id="tool-punch">
+        <div class="tool-row">
+          <button id="btnPunch" class="run"><span class="t-icon">🔍</span>Punch-in</button>
+          <button class="gear" title="Settings">⚙</button>
+        </div>
+        <div class="settings">
           <div class="fields">
-            <label class="f" title="Relative to the wide clips. 110–115 % is subtle, 120 %+ is obvious."><span>Zoom</span><div class="in"><input type="text" id="punchZoom" value="110"><em>%</em></div></label>
+            <label class="f"><span>Zoom</span><div class="in"><input type="text" id="punchZoom" value="110"><em>%</em></div></label>
           </div>
           <div class="row">
-            <label class="chk" title="Plays the sound chosen under SFX on every punch-in — only where the picture zooms in."><input type="checkbox" id="punchSfx"> Play the SFX sound on each zoom-in</label>
+            <label class="chk"><input type="checkbox" id="punchSfx"> SFX on zoom</label>
           </div>
-          <button id="btnPunch" class="btn primary">Punch-in selected clips</button>
         </div>
-      </details>
+      </div>
 
-      <details class="tool" id="tool-dz">
-        <summary><span class="t-icon">🎥</span><span class="t-name">Dynamic Zoom</span><span class="t-desc">slow animated push-in</span><span class="chev"></span></summary>
-        <div class="t-body">
+      <div class="tool" id="tool-dz">
+        <div class="tool-row">
+          <button id="btnDynZoom" class="run"><span class="t-icon">🎥</span>Dynamic Zoom</button>
+          <button class="gear" title="Settings">⚙</button>
+        </div>
+        <div class="settings">
           <div class="fields">
-            <label class="f" title="How far the zoom travels, relative to the clip's current scale."><span>Amount</span><div class="in"><input type="text" id="dzAmount" value="115"><em>%</em></div></label>
-            <label class="f" title="Alternate: in on the first clip, out on the next, and so on — good on jump cuts."><span>Direction</span>
+            <label class="f"><span>Amount</span><div class="in"><input type="text" id="dzAmount" value="115"><em>%</em></div></label>
+            <label class="f"><span>Direction</span>
               <select id="dzDir">
-                <option value="in">Zoom in</option>
-                <option value="out">Zoom out</option>
-                <option value="alt">Alternate in / out</option>
+                <option value="in">In</option>
+                <option value="out">Out</option>
+                <option value="alt">Alternate</option>
               </select>
             </label>
           </div>
           <div class="row">
-            <label class="chk" title="Starts and stops gently instead of moving at a constant speed."><input type="checkbox" id="dzEase" checked> Ease in and out</label>
+            <label class="chk"><input type="checkbox" id="dzEase" checked> Ease</label>
           </div>
-          <button id="btnDynZoom" class="btn primary">Dynamic Zoom selected clips</button>
         </div>
-      </details>
+      </div>
 
-      <details class="tool" id="tool-sfx">
-        <summary><span class="t-icon">💥</span><span class="t-name">SFX at cuts</span><span class="t-desc">a sound on every join</span><span class="chev"></span></summary>
-        <div class="t-body">
+      <div class="tool" id="tool-sfx">
+        <div class="tool-row">
+          <button id="btnSfx" class="run"><span class="t-icon">💥</span>SFX at cuts</button>
+          <button class="gear" title="Settings">⚙</button>
+        </div>
+        <div class="settings">
           <div class="sound">
-            <button id="btnSfxPick" class="mini" title="Any wav / mp3 / aif on your computer. Remembered on this machine.">Choose sound…</button>
+            <button id="btnSfxPick" class="mini">Choose sound…</button>
             <span id="sfxName" class="name">no sound chosen</span>
           </div>
           <div class="fields">
-            <label class="f" title="Where the sound sits relative to the cut. Whooshes usually sound best centred."><span>Position</span>
+            <label class="f"><span>Position</span>
               <select id="sfxAlign">
                 <option value="center">Centred on cut</option>
                 <option value="start">Starts at cut</option>
@@ -323,46 +338,36 @@
               </select>
             </label>
           </div>
-          <button id="btnSfx" class="btn primary">SFX at cuts between selected clips</button>
         </div>
-      </details>
+      </div>
     </section>
 
     <!-- ════════ Project ════════ -->
     <section class="pane" id="pane-project">
-      <div class="card">
-        <button id="btnSort" class="btn quiet">🗂 Sort project into bins</button>
+      <div class="tool">
+        <div class="tool-row"><button id="btnSort" class="run"><span class="t-icon">🗂</span>Sort into bins</button></div>
+      </div>
+      <div class="tool">
+        <div class="tool-row"><button id="btnPasteImg" class="run"><span class="t-icon">📸</span>Paste screenshot</button></div>
       </div>
 
-      <div class="card">
-        <button id="btnPasteImg" class="btn quiet">📸 Paste screenshot from clipboard</button>
-      </div>
+      <div id="projectInfo">Detecting…</div>
 
-      <div class="card">
-        <h2>Current project</h2>
-        <div id="projectInfo">Detecting…</div>
+      <details class="plain" id="installHelp">
+        <summary>Install on another machine</summary>
+        <div class="ins-os">Mac · Terminal</div>
+        <div class="ins-row">
+          <input type="text" id="insMac" readonly value="curl -fsSL https://raw.githubusercontent.com/dsquash/media-downloader/main/install.sh | bash">
+          <button class="mini ins-copy" data-target="insMac" title="Copy">⧉</button>
+        </div>
+        <div class="ins-os">Windows · PowerShell</div>
+        <div class="ins-row">
+          <input type="text" id="insWin" readonly value="irm https://raw.githubusercontent.com/dsquash/media-downloader/main/install.ps1 | iex">
+          <button class="mini ins-copy" data-target="insWin" title="Copy">⧉</button>
+        </div>
+      </details>
 
-        <details class="plain" id="installHelp">
-          <summary>⚙ Install on another machine</summary>
-          <div class="ins-os">macOS — open <b>Terminal</b></div>
-          <div class="ins-row">
-            <input type="text" id="insMac" readonly value="curl -fsSL https://raw.githubusercontent.com/dsquash/media-downloader/main/install.sh | bash">
-            <button class="mini ins-copy" data-target="insMac" title="Copy">⧉</button>
-          </div>
-          <div class="ins-os">Windows — open <b>PowerShell</b></div>
-          <div class="ins-row">
-            <input type="text" id="insWin" readonly value="irm https://raw.githubusercontent.com/dsquash/media-downloader/main/install.ps1 | iex">
-            <button class="mini ins-copy" data-target="insWin" title="Copy">⧉</button>
-          </div>
-          <div class="ins-note">
-            Paste it, press Enter, then restart Premiere Pro / After Effects and open
-            <b>Window → Extensions → Media Downloader</b>.<br>
-            The same command repairs an existing install — it also fetches yt-dlp, ffmpeg and deno.
-          </div>
-        </details>
-      </div>
-
-      <div class="credit-line">Reach out to Marian Grosu for any problem.</div>
+      <div class="credit-line">Marian Grosu</div>
     </section>
 
   </main>
@@ -377,7 +382,7 @@
 
 <!-- the ?v= query defeats CEF's stale script cache — keep it equal to version.json,
      otherwise an auto-update writes a new main.js that the panel never reads -->
-<script src="js/CSInterface.js?v=1.9.3"></script>
-<script src="js/main.js?v=1.9.3"></script>
+<script src="js/CSInterface.js?v=2.0.0"></script>
+<script src="js/main.js?v=2.0.0"></script>
 </body>
 </html>

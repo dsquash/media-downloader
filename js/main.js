@@ -813,7 +813,11 @@ function numIn(el, def) {
     return isFinite(v) ? v : def;
 }
 
+var lastRunBtn = null;
+
 function setToolsBusy(busy) {
+    if (lastRunBtn) lastRunBtn.classList.toggle("busy", busy);
+    if (!busy) lastRunBtn = null;
     elRoughCut.disabled = busy;
     elNormalize.disabled = busy;
     elPunch.disabled = busy;
@@ -1057,10 +1061,10 @@ function applyGain(items, results, target, cb) {
         var gains = list.map(function (x) { return x.gain; });
         var lo = Math.min.apply(null, gains), hi = Math.max.apply(null, gains);
         var fmt = function (g) { return (g > 0 ? "+" : "") + g.toFixed(1); };
-        var msg = "Normalized " + r.done + " clip(s) to " + target + " LUFS (" +
+        var msg = "✔ " + r.done + " clip(s) → " + target + " LUFS (" +
                   (lo === hi ? fmt(lo) : fmt(lo) + " … " + fmt(hi)) + " dB).";
-        if (r.capped) msg += " " + r.capped + " capped at +15 dB, Premiere's maximum.";
-        if (r.failed) msg += " " + r.failed + " could not be changed.";
+        if (r.capped) msg += " · " + r.capped + " capped at +15 dB";
+        if (r.failed) msg += " · " + r.failed + " failed";
         cb(null, msg);
     });
 }
@@ -1099,8 +1103,7 @@ function roughCutWith(sfx) {
     getSelection(function (sel) {
         if (sel.error) { toolsDone(sel.error, true); return; }
         if (sel.unlinked && close) {
-            toolsDone("Some selected clips have linked video/audio that isn't selected. Select it too " +
-                      "(or turn on Linked Selection) — otherwise it falls out of sync.", true);
+            toolsDone("Select the linked audio/video too.", true);
             return;
         }
         analyzeAll(sel.items, { silence: true, noise: noise, minDur: minDur, loudness: norm }, function (err, results) {
@@ -1122,15 +1125,15 @@ function roughCutWith(sfx) {
                     var r;
                     try { r = JSON.parse(res); } catch (e) { toolsDone("Rough cut failed: " + res, true); return; }
                     if (r.error) { toolsDone(prefix + r.error, true); return; }
-                    var msg = "✔ Cut " + r.applied + " silent section(s)";
-                    msg += close && r.closed ? " — " + fmtDur(r.saved) + " shorter." : ", gaps left in place.";
-                    if (close && !r.closed) msg += " Some gaps could not be closed: Sequence → Close Gap.";
-                    if (punch) msg += " Punch-in on " + (r.punched || 0) + " piece(s).";
+                    var msg = "✔ " + r.applied + " cuts";
+                    if (close && r.closed) msg += " · " + fmtDur(r.saved) + " shorter";
+                    if (close && !r.closed) msg += " · some gaps left (Sequence → Close Gap)";
+                    if (punch) msg += " · " + (r.punched || 0) + " punch-ins";
                     if (sfx) msg += sfxNote(r.sfxPlaced, r.sfxNoRoom);
-                    if (r.skipped) msg += " " + r.skipped + " skipped (unselected clips on the same tracks).";
-                    if (r.missed) msg += " " + r.missed + " could not be cut cleanly and were left alone.";
-                    if (r.stuck) msg += " " + r.stuck + " piece(s) refused to delete — remove them by hand.";
-                    if (r.backup) msg += " Original kept as “" + r.backup + "”.";
+                    if (r.skipped) msg += " · " + r.skipped + " skipped (unselected clips)";
+                    if (r.missed) msg += " · " + r.missed + " not cut";
+                    if (r.stuck) msg += " · " + r.stuck + " won't delete";
+                    if (r.backup) msg += " · backup: " + r.backup;
                     toolsDone(prefix + msg, false);
                 });
             }
@@ -1185,8 +1188,8 @@ function punchSelectedWith(sfx) {
         var r;
         try { r = JSON.parse(res); } catch (e) { toolsDone("Punch-in failed: " + res, true); return; }
         if (r.error) { toolsDone(r.error, true); return; }
-        var msg = "✔ Punch-in " + zoom + "% on " + r.done + " of " + r.seen + " clip(s) — every second one.";
-        if (r.done < Math.floor(r.seen / 2)) msg += " Clips with keyframed Scale were left alone.";
+        var msg = "✔ " + r.done + " punch-ins at " + zoom + "%";
+        if (r.done < Math.floor(r.seen / 2)) msg += " · keyframed clips skipped";
         if (sfx) msg += sfxNote(r.sfxPlaced, r.sfxNoRoom);
         toolsDone(msg, false);
     });
@@ -1205,9 +1208,9 @@ function dynamicZoomSelected() {
         var r;
         try { r = JSON.parse(res); } catch (e) { toolsDone("Dynamic Zoom failed: " + res, true); return; }
         if (r.error) { toolsDone(r.error, true); return; }
-        var label = { "in": "zoom in", out: "zoom out", alt: "alternating in / out" }[opts.dir];
-        var msg = "✔ Dynamic Zoom (" + label + ", " + amount + "%) on " + r.done + " clip(s).";
-        if (r.failed) msg += " " + r.failed + " could not be animated (too short, or no Motion effect).";
+        var label = { "in": "in", out: "out", alt: "alternate" }[opts.dir];
+        var msg = "✔ " + r.done + " clip(s) · " + label + " " + amount + "%";
+        if (r.failed) msg += " · " + r.failed + " skipped";
         toolsDone(msg, !r.done);
     });
 }
@@ -1256,8 +1259,8 @@ function sfxAtCuts(file) {
             var r;
             try { r = JSON.parse(res); } catch (e) { toolsDone("SFX at cuts failed: " + res, true); return; }
             if (r.error) { toolsDone(r.error, true); return; }
-            var msg = "✔ " + path.basename(file) + " placed on " + r.placed + " of " + r.points + " cut(s).";
-            if (r.noRoom) msg += " " + r.noRoom + " had no free audio track — add an empty one and run it again.";
+            var msg = "✔ " + r.placed + " sounds placed";
+            if (r.noRoom) msg += " · " + r.noRoom + " need a free audio track";
             toolsDone(msg, !r.placed);
         });
     });
@@ -1280,8 +1283,8 @@ function withSfx(needed, run) {
 }
 
 function sfxNote(placed, noRoom) {
-    var n = " Sound on " + (placed || 0) + " punch-in(s).";
-    if (noRoom) n += " " + noRoom + " had no free audio track — add an empty one.";
+    var n = " · " + (placed || 0) + " sounds";
+    if (noRoom) n += " (" + noRoom + " need a free audio track)";
     return n;
 }
 
@@ -1438,14 +1441,33 @@ checkTools();
     if (!document.getElementById("pane-" + saved)) saved = "download";
     show(saved);
 
-    Array.prototype.forEach.call(document.querySelectorAll("details.tool"), function (d) {
-        var key = "md.open." + d.id;
+    // ⚙ opens a tool's settings; which ones are open is remembered
+    Array.prototype.forEach.call(document.querySelectorAll(".tool"), function (tool) {
+        var gear = tool.querySelector(".gear");
+        if (!gear || !tool.id) return;
+        var key = "md.open." + tool.id;
+        try { if (localStorage.getItem(key) === "1") tool.classList.add("open"); } catch (e2) {}
+        gear.addEventListener("click", function () {
+            tool.classList.toggle("open");
+            try { localStorage.setItem(key, tool.classList.contains("open") ? "1" : "0"); } catch (e3) {}
+        });
+    });
+
+    // every setting keeps its value between sessions — set it once, then just click
+    Array.prototype.forEach.call(document.querySelectorAll(".settings input, .settings select"), function (el) {
+        if (!el.id) return;
+        var key = "md.val." + el.id;
         try {
             var v = localStorage.getItem(key);
-            if (v !== null) d.open = v === "1";
-        } catch (e2) {}
-        d.addEventListener("toggle", function () {
-            try { localStorage.setItem(key, d.open ? "1" : "0"); } catch (e3) {}
+            if (v !== null) { if (el.type === "checkbox") el.checked = v === "1"; else el.value = v; }
+        } catch (e4) {}
+        el.addEventListener("change", function () {
+            try { localStorage.setItem(key, el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value); } catch (e5) {}
         });
+    });
+
+    // the tool you clicked stays lit while it works
+    Array.prototype.forEach.call(document.querySelectorAll(".run"), function (b) {
+        b.addEventListener("click", function () { lastRunBtn = b; }, true);
     });
 })();
